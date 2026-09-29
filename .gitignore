@@ -1,0 +1,8 @@
+build/
+*.class
+!tools/GPRunner.class
+.idea/
+*.iml
+.vscode/
+*.log
+*.tmp
