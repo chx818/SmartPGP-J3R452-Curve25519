@@ -151,6 +151,15 @@ gpg/card> generate
 
 ---
 
+### 📄 8. License & Acknowledgments
+
+This project is licensed under the **GNU General Public License v2 (GPL-2.0)** - see the [LICENSE](LICENSE) file for details.
+
+- **[github-af/SmartPGP](https://github.com/github-af/SmartPGP)** & **[ANSSI-FR/SmartPGP](https://github.com/ANSSI-FR/SmartPGP)**: Original Java Card OpenPGP v3.4 implementation © ANSSI and SmartPGP contributors.
+- **[suut/Curve25519-JavaCard](https://github.com/suut/Curve25519-JavaCard)**: NXP J3R452 hardware Curve25519 library © suut.
+
+---
+
 <br><br>
 
 ---
@@ -303,7 +312,6 @@ gpg/card> generate
 
 本项目遵循 **GNU General Public License v2 (GPL-2.0)** 开源许可证协议 - 详见 [LICENSE](LICENSE) 文件。
 
-### 上游项目致谢：
-- **[github-af/SmartPGP](https://github.com/github-af/SmartPGP)** & **[ANSSI-FR/SmartPGP](https://github.com/ANSSI-FR/SmartPGP)**: 原始 Java Card OpenPGP v3.4 规范实现 © ANSSI。
-- **[suut/Curve25519-JavaCard](https://github.com/suut/Curve25519-JavaCard)**: NXP J3R452 硬件 Curve25519 加速驱动库 © suut。
-- J3R452 硬件融合重构、侧信道密码学安全审计与 PC/SC 熵池加固 © 2026。
+### 致谢 (Acknowledgments)：
+- **[github-af/SmartPGP](https://github.com/github-af/SmartPGP)** & **[ANSSI-FR/SmartPGP](https://github.com/ANSSI-FR/SmartPGP)**: 原始 Java Card OpenPGP v3.4 规范实现 © ANSSI 及 SmartPGP 开源贡献者。
+- **[suut/Curve25519-JavaCard](https://github.com/suut/Curve25519-JavaCard)**: NXP J3R452 底层硬件 Curve25519 协处理器驱动库 © suut。
