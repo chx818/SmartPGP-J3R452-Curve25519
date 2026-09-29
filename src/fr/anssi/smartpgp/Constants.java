@@ -215,7 +215,7 @@ public final class Constants {
 
 
     protected static final byte ALGORITHM_ATTRIBUTES_MIN_LENGTH = 6;
-    protected static final byte ALGORITHM_ATTRIBUTES_MAX_LENGTH = 13;
+    protected static final byte ALGORITHM_ATTRIBUTES_MAX_LENGTH = 32;
 
     protected static final byte[] ALGORITHM_ATTRIBUTES_DEFAULT = {
         (byte)0x01, /* RSA */

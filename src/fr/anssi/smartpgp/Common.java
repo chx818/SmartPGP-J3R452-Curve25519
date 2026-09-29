@@ -30,6 +30,11 @@ import javacard.security.RandomData;
 import javacard.security.Signature;
 import javacardx.crypto.Cipher;
 
+import org.suut.javacard.pki.curve25519.Curve25519KeyAgreement;
+import org.suut.javacard.pki.curve25519.Curve25519KeyBuilder;
+import org.suut.javacard.pki.curve25519.Curve25519PublicKey;
+import org.suut.javacard.pki.curve25519.Curve25519Signature;
+
 public final class Common {
     protected final Cipher cipher_aes_cbc_nopad;
     protected final Cipher cipher_rsa_pkcs1;
@@ -39,10 +44,13 @@ public final class Common {
     protected final Signature sign_ecdsa_sha_256;
     protected final Signature sign_ecdsa_sha_384;
     protected final Signature sign_ecdsa_sha_512;
-    protected final Signature sign_eddsa;
 
     protected final KeyAgreement ka_ec_dh;
-    protected final KeyAgreement ka_xdh;
+
+    /* J3R452 Curve25519 hardware crypto */
+    protected final Curve25519Signature curve25519_sig;
+    protected final Curve25519KeyAgreement curve25519_ka;
+    protected final Curve25519PublicKey curve25519_eph_pub;
 
     protected final RandomData random;
 
@@ -55,12 +63,24 @@ public final class Common {
         sign_ecdsa_sha_256 = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
         sign_ecdsa_sha_384 = Signature.getInstance(Signature.ALG_ECDSA_SHA_384, false);
         sign_ecdsa_sha_512 = Signature.getInstance(Signature.ALG_ECDSA_SHA_512, false);
-        sign_eddsa = Signature.getInstance(MessageDigest.ALG_NULL, Signature.SIG_CIPHER_EDDSA, Cipher.PAD_NULL, false);
 
         ka_ec_dh = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH_PLAIN, false);
-        ka_xdh = KeyAgreement.getInstance(KeyAgreement.ALG_XDH, false);
 
-        random = RandomData.getInstance(RandomData.ALG_TRNG);
+        /* Initialize J3R452 hardware Curve25519 instances */
+        curve25519_sig = new Curve25519Signature();
+        curve25519_ka = new Curve25519KeyAgreement();
+        curve25519_eph_pub = (Curve25519PublicKey)Curve25519KeyBuilder.buildKey(
+            Curve25519KeyBuilder.ALG_TYPE_X25519_PUBLIC,
+            JCSystem.MEMORY_TYPE_TRANSIENT_DESELECT
+        );
+
+        RandomData rnd = null;
+        try {
+            rnd = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
+        } catch (Exception e) {
+            rnd = RandomData.getInstance(RandomData.ALG_TRNG);
+        }
+        random = rnd;
     }
 
     protected static final void beginTransaction(final boolean isRegistering) {
@@ -76,7 +96,7 @@ public final class Common {
     }
 
     protected static final short aesKeyLength(final ECParams params) {
-        if(params.nb_bits < (short)512) {
+        if(params.isCurve25519 || params.nb_bits < (short)512) {
             return (short)16;
         } else {
             return (short)32;
@@ -165,7 +185,6 @@ public final class Common {
         return (short)((bits / 8) + (short)(((bits % 8) == 0) ? 0 : 1));
     }
 
-
     protected static final void arrayLeftShift(final byte[] inBuf, short inOff,
                                                final byte[] outBuf, short outOff,
                                                final short len) {
@@ -193,14 +212,31 @@ public final class Common {
                                                            final byte key_tag, final boolean is_dec,
                                                            final byte[] buf, short off) {
         for(short i = 0; i < ec.curves.length; ++i) {
-            buf[off++] = key_tag;
-            buf[off++] = (byte)(1 + ec.curves[i].oid.length + 1); /* len */
-            if(is_dec) buf[off++] = (byte)0x12; /* ECDH */
-            else buf[off++] = (byte)0x13; /* ECDSA */
-            off = Util.arrayCopyNonAtomic(ec.curves[i].oid, (short)0,
-                                          buf, off,
-                                          (short)ec.curves[i].oid.length);
-            buf[off++] = (byte)0xff; /* with public key */
+            final ECParams p = ec.curves[i];
+            if(p.isCurve25519) {
+                if(p.isEd25519 && is_dec) continue; /* Ed25519 is for SIG/AUT, not DEC */
+                if(!p.isEd25519 && !is_dec) continue; /* X25519 is for DEC, not SIG/AUT */
+                buf[off++] = key_tag;
+                buf[off++] = (byte)(1 + p.oid.length + 1); /* len */
+                if(is_dec) {
+                    buf[off++] = (byte)0x12; /* ECDH (cv25519) */
+                } else {
+                    buf[off++] = (byte)0x16; /* EdDSA (Ed25519) */
+                }
+                off = Util.arrayCopyNonAtomic(p.oid, (short)0,
+                                              buf, off,
+                                              (short)p.oid.length);
+                buf[off++] = (byte)0xff; /* with public key */
+            } else {
+                buf[off++] = key_tag;
+                buf[off++] = (byte)(1 + p.oid.length + 1); /* len */
+                if(is_dec) buf[off++] = (byte)0x12; /* ECDH */
+                else buf[off++] = (byte)0x13; /* ECDSA */
+                off = Util.arrayCopyNonAtomic(p.oid, (short)0,
+                                              buf, off,
+                                              (short)p.oid.length);
+                buf[off++] = (byte)0xff; /* with public key */
+            }
         }
 
         for(short m = 2; m <= 4; ++m) {

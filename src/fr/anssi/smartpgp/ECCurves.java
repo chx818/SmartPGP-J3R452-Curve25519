@@ -20,60 +20,76 @@
 
 package fr.anssi.smartpgp;
 
-import javacard.security.NamedParameterSpec;
-
 public final class ECCurves {
 
     protected final ECParams[] curves;
 
     protected ECCurves() {
          final ECParams ansix9p256r1 =
-            new ECParams(ECConstants.ansix9p256r1_oid,
-                         false,
-                         (short)256,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.SECP256R1));
+            new ECParams((short)256,
+                         ECConstants.ansix9p256r1_oid,
+                         ECConstants.ansix9p256r1_field,
+                         ECConstants.ansix9p256r1_a,
+                         ECConstants.ansix9p256r1_b,
+                         ECConstants.ansix9p256r1_g,
+                         ECConstants.ansix9p256r1_r,
+                         (short)1);
 
          final ECParams ansix9p384r1 =
-            new ECParams(ECConstants.ansix9p384r1_oid,
-                         false,
-                         (short)384,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.SECP384R1));
+            new ECParams((short)384,
+                         ECConstants.ansix9p384r1_oid,
+                         ECConstants.ansix9p384r1_field,
+                         ECConstants.ansix9p384r1_a,
+                         ECConstants.ansix9p384r1_b,
+                         ECConstants.ansix9p384r1_g,
+                         ECConstants.ansix9p384r1_r,
+                         (short)1);
 
          final ECParams ansix9p521r1 =
-            new ECParams(ECConstants.ansix9p521r1_oid,
-                         false,
-                         (short)521,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.SECP521R1));
+            new ECParams((short)521,
+                         ECConstants.ansix9p521r1_oid,
+                         ECConstants.ansix9p521r1_field,
+                         ECConstants.ansix9p521r1_a,
+                         ECConstants.ansix9p521r1_b,
+                         ECConstants.ansix9p521r1_g,
+                         ECConstants.ansix9p521r1_r,
+                         (short)1);
 
          final ECParams brainpoolP256r1 =
-            new ECParams(ECConstants.brainpoolP256r1_oid,
-                         false,
-                         (short)256,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.BRAINPOOLP256R1));
+            new ECParams((short)256,
+                         ECConstants.brainpoolP256r1_oid,
+                         ECConstants.brainpoolP256r1_field,
+                         ECConstants.brainpoolP256r1_a,
+                         ECConstants.brainpoolP256r1_b,
+                         ECConstants.brainpoolP256r1_g,
+                         ECConstants.brainpoolP256r1_r,
+                         (short)1);
 
          final ECParams brainpoolP384r1 =
-            new ECParams(ECConstants.brainpoolP384r1_oid,
-                         false,
-                         (short)384,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.BRAINPOOLP384R1));
+            new ECParams((short)384,
+                         ECConstants.brainpoolP384r1_oid,
+                         ECConstants.brainpoolP384r1_field,
+                         ECConstants.brainpoolP384r1_a,
+                         ECConstants.brainpoolP384r1_b,
+                         ECConstants.brainpoolP384r1_g,
+                         ECConstants.brainpoolP384r1_r,
+                         (short)1);
 
          final ECParams brainpoolP512r1 =
-            new ECParams(ECConstants.brainpoolP512r1_oid,
-                         false,
-                         (short)512,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.BRAINPOOLP512R1));
+            new ECParams((short)512,
+                         ECConstants.brainpoolP512r1_oid,
+                         ECConstants.brainpoolP512r1_field,
+                         ECConstants.brainpoolP512r1_a,
+                         ECConstants.brainpoolP512r1_b,
+                         ECConstants.brainpoolP512r1_g,
+                         ECConstants.brainpoolP512r1_r,
+                         (short)1);
 
         final ECParams x25519 =
-            new ECParams(ECConstants.x25519_oid,
-                         true,
-                         (short)255,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.X25519));
+            new ECParams(ECConstants.x25519_oid, false);
 
         final ECParams ed25519 =
-            new ECParams(ECConstants.ed25519_oid,
-                         true,
-                         (short)255,
-                         NamedParameterSpec.getInstance(NamedParameterSpec.ED25519));
+            new ECParams(ECConstants.ed25519_oid, true);
 
         curves = new ECParams[]{
             ansix9p256r1,

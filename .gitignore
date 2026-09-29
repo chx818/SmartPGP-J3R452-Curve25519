@@ -1,3 +1,8 @@
-ant-javacard.jar
-build
-SmartPGPApplet.cap
+build/
+*.class
+!tools/GPRunner.class
+.idea/
+*.iml
+.vscode/
+*.log
+*.tmp

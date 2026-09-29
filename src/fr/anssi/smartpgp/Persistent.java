@@ -27,6 +27,8 @@ import javacard.security.AESKey;
 
 public final class Persistent {
 
+    private static final byte[] EMPTY_PIN = new byte[1];
+
     protected boolean isTerminated;
 
     protected final byte[] login;
@@ -244,9 +246,8 @@ public final class Persistent {
         Common.beginTransaction(isRegistering);
         user_puk_length = (short)0;
         /* Ensures any previously defined PUK code is blocked at factory reset */
-        byte[] emptyPin = new byte[1];
         while(user_puk.getTriesRemaining() > 0) {
-            if(user_puk.check(emptyPin, (short)0, (byte)emptyPin.length)) {
+            if(user_puk.check(EMPTY_PIN, (short)0, (byte)EMPTY_PIN.length)) {
                 ISOException.throwIt((short)0x9999);
             }
         }

@@ -49,7 +49,12 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     }
 
     public static final void install(byte[] buf, short off, byte len) {
-        new SmartPGPApplet().register(buf, (short)(off + 1), buf[off]);
+        SmartPGPApplet applet = new SmartPGPApplet();
+        if((buf != null) && (buf[off] > 0)) {
+            applet.register(buf, (short)(off + 1), buf[off]);
+        } else {
+            applet.register();
+        }
     }
 
     private final PGPKey currentTagOccurenceToKey() {
@@ -1471,7 +1476,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         }
 
         if(le != 0) {
-            common.random.nextBytes(transients.buffer, (short)0, le);
+            common.random.generateData(transients.buffer, (short)0, le);
         }
 
         return le;
@@ -1525,6 +1530,10 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         data.admin_pin.reset();
         transients.clear();
         sm.clearSession(transients);
+    }
+
+    public final void deselect() {
+        clearConnection();
     }
 
     public final void process(final APDU apdu) {
