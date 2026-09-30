@@ -39,10 +39,9 @@ public final class CmacSignature {
     private static final byte BYTES_SIZE = BYTE_OFFSET_BLOCK_LEN + 1;
 
 
-    protected CmacSignature() {
+    protected CmacSignature(final Cipher cipher) {
         key = null;
-
-        cipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
+        this.cipher = cipher;
 
         block_prev = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);
         block = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);

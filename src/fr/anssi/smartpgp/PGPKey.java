@@ -382,20 +382,25 @@ public final class PGPKey {
             keys = generateEC(ec);
         }
 
+        if(!isCurve25519(ec)) {
+            if((keys == null) || (keys.getPrivate() == null) || (keys.getPublic() == null)) {
+                resetKeys(false);
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+                return;
+            }
+            try {
+                keys.genKeyPair();
+            } catch (CryptoException e) {
+                resetKeys(false);
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+                return;
+            }
+        }
+
         if(!isInitialized()) {
             resetKeys(false);
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
             return;
-        }
-
-        if(!isCurve25519(ec)) {
-            keys.genKeyPair();
-            if(!keys.getPublic().isInitialized() || !keys.getPrivate().isInitialized()) {
-                keys = null;
-                Common.requestDeletion();
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-                return;
-            }
         }
 
         has_been_generated = true;
@@ -819,10 +824,11 @@ public final class PGPKey {
                 return 0;
             }
 
-            common.cipher_rsa_pkcs1.init(priv, Cipher.MODE_ENCRYPT);
+            final Cipher cipher = common.getCipherRsaPkcs1();
+            cipher.init(priv, Cipher.MODE_ENCRYPT);
 
-            off = common.cipher_rsa_pkcs1.doFinal(buf, (short)0, lc,
-                                                  buf, lc);
+            off = cipher.doFinal(buf, (short)0, lc,
+                                 buf, lc);
 
             return Util.arrayCopyNonAtomic(buf, lc,
                                            buf, (short)0,
@@ -843,7 +849,7 @@ public final class PGPKey {
             /* Ed25519 sign in hardware: writes 64-byte signature at buf[lc] */
             short sig_size = 0;
             try {
-                sig_size = common.curve25519_sig.sign(c25519_priv, buf, (short)0, lc, buf, lc);
+                sig_size = common.getCurve25519Sig().sign(c25519_priv, buf, (short)0, lc, buf, lc);
             } catch (CryptoException e) {
                 Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
@@ -859,22 +865,7 @@ public final class PGPKey {
 
         } else if(isEc()) {
             final PrivateKey priv = keys.getPrivate();
-            Signature sig;
-
-            if(lc == MessageDigest.LENGTH_SHA) {
-                sig = common.sign_ecdsa_sha;
-            } else if(lc == MessageDigest.LENGTH_SHA_224) {
-                sig = common.sign_ecdsa_sha_224;
-            } else if(lc == MessageDigest.LENGTH_SHA_256) {
-                sig = common.sign_ecdsa_sha_256;
-            } else if(lc == MessageDigest.LENGTH_SHA_384) {
-                sig = common.sign_ecdsa_sha_384;
-            } else if(lc == MessageDigest.LENGTH_SHA_512) {
-                sig = common.sign_ecdsa_sha_512;
-            } else {
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-                return 0;
-            }
+            final Signature sig = common.getEcdsaSignature(lc);
 
             sig.init(priv, Signature.MODE_SIGN);
 
@@ -968,10 +959,11 @@ public final class PGPKey {
                 return 0;
             }
 
-            common.cipher_rsa_pkcs1.init(priv, Cipher.MODE_DECRYPT);
+            final Cipher cipher = common.getCipherRsaPkcs1();
+            cipher.init(priv, Cipher.MODE_DECRYPT);
 
-            final short len = common.cipher_rsa_pkcs1.doFinal(buf, (short)1, (short)(lc - 1),
-                                                              buf, lc);
+            final short len = cipher.doFinal(buf, (short)1, (short)(lc - 1),
+                                             buf, lc);
 
             off = Util.arrayCopyNonAtomic(buf, lc,
                                           buf, (short)0,
@@ -1043,19 +1035,20 @@ public final class PGPKey {
             }
 
             /* Load remote public key into transient key object */
-            common.curve25519_eph_pub.setW(buf, off, (short)32);
+            final Curve25519PublicKey eph = common.getCurve25519EphPub();
+            eph.setW(buf, off, (short)32);
 
             /* Hardware X25519 key agreement */
             short secret_len = 0;
             try {
-                secret_len = common.curve25519_ka.keyExchange(c25519_priv, common.curve25519_eph_pub, buf, lc);
+                secret_len = common.getCurve25519Ka().keyExchange(c25519_priv, eph, buf, lc);
             } catch (CryptoException e) {
                 Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 return 0;
             } finally {
                 /* Cryptographic Audit: Zeroize ephemeral public key object immediately */
-                common.curve25519_eph_pub.clearKey();
+                eph.clearKey();
             }
 
             /* Copy shared secret to response buffer */
@@ -1119,10 +1112,11 @@ public final class PGPKey {
                 return 0;
             }
 
-            common.ka_ec_dh.init(priv);
+            final KeyAgreement ka = common.getKaEcDh();
+            ka.init(priv);
 
-            final short len  = common.ka_ec_dh.generateSecret(buf, off, (short)(lc - off),
-                                                              buf, lc);
+            final short len  = ka.generateSecret(buf, off, (short)(lc - off),
+                                                 buf, lc);
 
             off = Util.arrayCopyNonAtomic(buf, lc,
                                           buf, (short)0,

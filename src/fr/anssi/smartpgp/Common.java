@@ -37,42 +37,25 @@ import org.suut.javacard.pki.curve25519.Curve25519Signature;
 
 public final class Common {
     protected final Cipher cipher_aes_cbc_nopad;
-    protected final Cipher cipher_rsa_pkcs1;
+    protected final RandomData random;
 
-    protected final Signature sign_ecdsa_sha;
-    protected final Signature sign_ecdsa_sha_224;
-    protected final Signature sign_ecdsa_sha_256;
-    protected final Signature sign_ecdsa_sha_384;
-    protected final Signature sign_ecdsa_sha_512;
+    /* Lazy-loaded cryptographic engines to preserve JCOP 4.5 COR/System RAM */
+    private Cipher cipher_rsa_pkcs1;
+    private KeyAgreement ka_ec_dh;
 
-    protected final KeyAgreement ka_ec_dh;
+    private Signature sign_ecdsa_sha;
+    private Signature sign_ecdsa_sha_224;
+    private Signature sign_ecdsa_sha_256;
+    private Signature sign_ecdsa_sha_384;
+    private Signature sign_ecdsa_sha_512;
 
     /* J3R452 Curve25519 hardware crypto */
-    protected final Curve25519Signature curve25519_sig;
-    protected final Curve25519KeyAgreement curve25519_ka;
-    protected final Curve25519PublicKey curve25519_eph_pub;
-
-    protected final RandomData random;
+    private Curve25519Signature curve25519_sig;
+    private Curve25519KeyAgreement curve25519_ka;
+    private Curve25519PublicKey curve25519_eph_pub;
 
     protected Common() {
         cipher_aes_cbc_nopad = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
-        cipher_rsa_pkcs1 = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
-
-        sign_ecdsa_sha = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
-        sign_ecdsa_sha_224 = Signature.getInstance(Signature.ALG_ECDSA_SHA_224, false);
-        sign_ecdsa_sha_256 = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
-        sign_ecdsa_sha_384 = Signature.getInstance(Signature.ALG_ECDSA_SHA_384, false);
-        sign_ecdsa_sha_512 = Signature.getInstance(Signature.ALG_ECDSA_SHA_512, false);
-
-        ka_ec_dh = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH_PLAIN, false);
-
-        /* Initialize J3R452 hardware Curve25519 instances */
-        curve25519_sig = new Curve25519Signature();
-        curve25519_ka = new Curve25519KeyAgreement();
-        curve25519_eph_pub = (Curve25519PublicKey)Curve25519KeyBuilder.buildKey(
-            Curve25519KeyBuilder.ALG_TYPE_X25519_PUBLIC,
-            JCSystem.MEMORY_TYPE_TRANSIENT_DESELECT
-        );
 
         RandomData rnd = null;
         try {
@@ -81,6 +64,77 @@ public final class Common {
             rnd = RandomData.getInstance(RandomData.ALG_TRNG);
         }
         random = rnd;
+    }
+
+    public Cipher getCipherRsaPkcs1() {
+        if(cipher_rsa_pkcs1 == null) {
+            cipher_rsa_pkcs1 = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
+        }
+        return cipher_rsa_pkcs1;
+    }
+
+    public KeyAgreement getKaEcDh() {
+        if(ka_ec_dh == null) {
+            ka_ec_dh = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH_PLAIN, false);
+        }
+        return ka_ec_dh;
+    }
+
+    public Signature getEcdsaSignature(final short hashLen) {
+        switch(hashLen) {
+        case MessageDigest.LENGTH_SHA:
+            if(sign_ecdsa_sha == null) {
+                sign_ecdsa_sha = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
+            }
+            return sign_ecdsa_sha;
+        case MessageDigest.LENGTH_SHA_224:
+            if(sign_ecdsa_sha_224 == null) {
+                sign_ecdsa_sha_224 = Signature.getInstance(Signature.ALG_ECDSA_SHA_224, false);
+            }
+            return sign_ecdsa_sha_224;
+        case MessageDigest.LENGTH_SHA_256:
+            if(sign_ecdsa_sha_256 == null) {
+                sign_ecdsa_sha_256 = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
+            }
+            return sign_ecdsa_sha_256;
+        case MessageDigest.LENGTH_SHA_384:
+            if(sign_ecdsa_sha_384 == null) {
+                sign_ecdsa_sha_384 = Signature.getInstance(Signature.ALG_ECDSA_SHA_384, false);
+            }
+            return sign_ecdsa_sha_384;
+        case MessageDigest.LENGTH_SHA_512:
+            if(sign_ecdsa_sha_512 == null) {
+                sign_ecdsa_sha_512 = Signature.getInstance(Signature.ALG_ECDSA_SHA_512, false);
+            }
+            return sign_ecdsa_sha_512;
+        default:
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+            return null;
+        }
+    }
+
+    public Curve25519Signature getCurve25519Sig() {
+        if(curve25519_sig == null) {
+            curve25519_sig = new Curve25519Signature();
+        }
+        return curve25519_sig;
+    }
+
+    public Curve25519KeyAgreement getCurve25519Ka() {
+        if(curve25519_ka == null) {
+            curve25519_ka = new Curve25519KeyAgreement();
+        }
+        return curve25519_ka;
+    }
+
+    public Curve25519PublicKey getCurve25519EphPub() {
+        if(curve25519_eph_pub == null) {
+            curve25519_eph_pub = (Curve25519PublicKey)Curve25519KeyBuilder.buildKey(
+                Curve25519KeyBuilder.ALG_TYPE_X25519_PUBLIC,
+                JCSystem.MEMORY_TYPE_TRANSIENT_DESELECT
+            );
+        }
+        return curve25519_eph_pub;
     }
 
     protected static final void beginTransaction(final boolean isRegistering) {
