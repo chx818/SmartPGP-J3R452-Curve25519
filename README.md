@@ -59,8 +59,9 @@ The NXP J3R452 is an affordable, widely available smart card with a high-securit
    - Private key buffers imported via APDU are scrubbed (`Util.arrayFillNonAtomic`) immediately upon being loaded into secure key containers.
    - During `PSO: DECIPHER` (X25519), ephemeral public key objects are wiped in a `finally` block (`clearKey()`), and scratch buffers are overwritten with zeros.
    - Upon applet deselect, `clearConnection()` purges transient buffers and session keys.
-3. **Zero Dynamic Allocation (`new`) at Runtime**:
-   - All crypto objects and transient buffers are pre-allocated once during applet installation (`install()`) in `CLEAR_ON_DESELECT` RAM, preventing EEPROM wear and memory exhaustion.
+3. **Lazy-Loaded Engines & Zero-Duplicate Cipher Architecture**:
+   - To coexist smoothly on cards loaded with multiple intensive applets (PIV, FIDO2, Satochip, Seedkeeper, VivoKey OTP), SmartPGP shares a single AES-CBC engine across applet commands, Secure Messaging, and CMAC verification.
+   - Heavy cryptographic engines (RSA PKCS#1 ciphers, Weierstrass EC Diffie-Hellman, SHA-variant ECDSA signers, and Curve25519 hardware engines) are lazy-loaded on-demand via cached singletons. Static crypto engine instances at installation drop from 15 to 2, almost doubling free JCOP System RAM (Tag 03) and conserving COR RAM.
 4. **Dual Format Compatibility**:
    - Accepts both standard 32-byte raw points and 33-byte points prefixed with `0x40` (RFC 4880bis / RFC 9580).
 
@@ -213,8 +214,11 @@ NXP J3R452 是目前市场上应用最广泛、性价比最高且通过 CC EAL6+
    - APDU 导入的私钥在存入持久安全容器后，其内存缓冲区立即通过 `Util.arrayFillNonAtomic` 清零。
    - `PSO: DECIPHER` 计算完成后，在 `finally` 块中立即调用 `clearKey()` 硬件擦除临时公钥，暂存计算区全部刷零。
    - 卡片在断开或反选（Deselect）时，自动触发 `clearConnection()` 销毁所有会话密钥与 RAM 临时数据。
-3. **零运行期堆动态分配（无 `new`）**：
-   - 彻底杜绝运行期 APDU 指令处理循环中的任何 `new` 操作。所有硬件句柄与临时解析对象均在 `install()` 安装期一次性预先分配在 `CLEAR_ON_DESELECT` 类型的 RAM 中，防止 EEPROM 磨损与碎片化。
+3. **密码引擎按需懒加载与零冗余复用架构**：
+   - 为确保在多应用共存环境（如单卡同时部署 PIV、FIDO2、Satochip、Seedkeeper 与 VivoKey Apex OTP）下极限节约 JCOP 内存，SmartPGP 将单一 AES-CBC 引擎在应用主指令、安全信道（SM）及 CMAC 验签之间高度复用。
+   - 占资源的复杂硬件密码引擎（RSA PKCS#1 密码机、标准 EC 椭圆曲线 Diffie-Hellman、SHA 散列族 ECDSA 签名器以及 Curve25519 引擎）均采用按需懒加载的静态单例模式。安装期静态密码对象由 15 个锐减至 2 个，使 JCOP 系统堆 RAM（Tag 03）可用空间翻倍，彻底消除 COR RAM 挤占冲突。
+4. **双公钥格式原生兼容**：
+   - 兼容原生 32 字节裸点及 RFC 4880bis / RFC 9580 规定的带 `0x40` 前缀的 33 字节公钥格式。
 
 ---
 

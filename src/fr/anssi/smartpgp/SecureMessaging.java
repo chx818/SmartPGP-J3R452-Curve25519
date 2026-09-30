@@ -52,8 +52,8 @@ public final class SecureMessaging {
         (byte)0x81, (byte)0x01
     };
 
-    private final MessageDigest digest;
-    private final KeyAgreement key_agreement;
+    private final Common common;
+    private MessageDigest digest;
 
     protected final PGPKey static_key;
 
@@ -68,18 +68,17 @@ public final class SecureMessaging {
     private CmacKey srmac;
 
 
-    protected SecureMessaging(final Transients transients) {
-        digest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
-        key_agreement = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH_PLAIN, false);
+    protected SecureMessaging(final Common common, final Transients transients) {
+        this.common = common;
+        this.cipher = common.cipher_aes_cbc_nopad;
 
         static_key = new PGPKey(true);
 
-        cipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
         senc = null;
         iv = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE,
                                              JCSystem.CLEAR_ON_DESELECT);
 
-        macer = new CmacSignature();
+        macer = new CmacSignature(cipher);
         mac_chaining = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE,
                                                        JCSystem.CLEAR_ON_DESELECT);
         sreceiptmac = null;
@@ -87,6 +86,13 @@ public final class SecureMessaging {
         srmac = null;
 
         reset(true, transients);
+    }
+
+    private final MessageDigest getDigest() {
+        if(digest == null) {
+            digest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
+        }
+        return digest;
     }
 
 
@@ -222,6 +228,7 @@ public final class SecureMessaging {
             return 0;
         }
 
+        final KeyAgreement key_agreement = common.getKaEcDh();
         key_agreement.init(eskcard);
 
         short msglen = 0;
@@ -255,8 +262,8 @@ public final class SecureMessaging {
             Util.setShort(buf, off, counter);
             ++counter;
 
-            keylen += digest.doFinal(buf, len, msglen,
-                                     buf, (short)(len + msglen + keylen));
+            keylen += getDigest().doFinal(buf, len, msglen,
+                                          buf, (short)(len + msglen + keylen));
         }
 
         initSession(Common.aesKeyLength(params), buf, (short)(len + msglen));

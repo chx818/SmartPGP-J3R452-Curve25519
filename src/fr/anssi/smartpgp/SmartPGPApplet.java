@@ -45,7 +45,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         ec = new ECCurves();
         data = new Persistent();
         transients = new Transients();
-        sm = new SecureMessaging(transients);
+        sm = new SecureMessaging(common, transients);
     }
 
     public static final void install(byte[] buf, short off, byte len) {
