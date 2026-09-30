@@ -93,6 +93,11 @@ Tested on a physical NXP J3R452 card via PC/SC (`tests/test_curve25519.py`):
 ============================================================
 ```
 
+**Multi-Algorithm Physical Card Verification**:
+- `tests/test_curve25519.py`: Ed25519 & X25519 KeyGen, EdDSA sign, ECDH decipher -> **11/11 PASSED**
+- `tests/test_nistp256.py`: NIST P-256 (ansix9p256r1) On-Card KeyGen & ECDSA SHA-256 signing (66-byte DER) -> **PASSED [SW: 9000]**
+- `tests/test_rsa.py`: RSA 2048 CRT On-Card KeyGen & PKCS#1 v1.5 signing (256-byte) -> **PASSED [SW: 9000]**
+
 And verified via system `gpg --card-status`:
 ```text
 Application ID ...: D276000124010304AFAF000000000000
@@ -247,6 +252,11 @@ NXP J3R452 是目前市场上应用最广泛、性价比最高且通过 CC EAL6+
   11 项硬件密码学安全测试全部 100% 通过！
 ============================================================
 ```
+
+**多算法物理实机全覆盖验证**：
+- `tests/test_curve25519.py`：Ed25519 / X25519 密钥生成、EdDSA 签名、ECDH 硬件解密 -> **11 项全部通过**
+- `tests/test_nistp256.py`：NIST P-256（ansix9p256r1）卡内密钥生成与 ECDSA SHA-256 签名（66 字节 DER） -> **实机通过 [SW: 9000]**
+- `tests/test_rsa.py`：RSA 2048 CRT 卡内密钥生成与 PKCS#1 v1.5 填充签名（256 字节） -> **实机通过 [SW: 9000]**
 
 在系统终端执行官方 `gpg --card-status` 验证：
 ```text
