@@ -104,7 +104,7 @@ public final class SecureMessaging {
 
         macer.clear();
         Util.arrayFillNonAtomic(mac_chaining, (short)0, (short)mac_chaining.length, (byte)0);
-        if((sreceiptmac != null) && senc.isInitialized()) {
+        if((sreceiptmac != null) && sreceiptmac.isInitialized()) {
             sreceiptmac.clearKey();
         }
         if((smac != null) && smac.isInitialized()) {

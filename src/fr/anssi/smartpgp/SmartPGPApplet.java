@@ -1097,15 +1097,22 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                     return;
                 }
-                JCSystem.beginTransaction();
-                if(data.aes_key != null) {
-                    data.aes_key.clearKey();
+                if((data.aes_key == null) || (data.aes_key.getSize() != (short)(lc * 8))) {
+                    final AESKey new_key = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES,
+                                                                      (short)(lc * 8),
+                                                                      false);
+                    new_key.setKey(buf, (short)0);
+                    JCSystem.beginTransaction();
+                    if(data.aes_key != null) {
+                        data.aes_key.clearKey();
+                    }
+                    data.aes_key = new_key;
+                    JCSystem.commitTransaction();
+                    Common.requestDeletion();
+                } else {
+                    data.aes_key.setKey(buf, (short)0);
                 }
-                data.aes_key = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES,
-                                                           (short)(lc * 8),
-                                                           false);
-                data.aes_key.setKey(buf, (short)0);
-                JCSystem.commitTransaction();
+                Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
                 break;
 
             case Constants.TAG_CARDHOLDER_CERTIFICATE:
@@ -1219,6 +1226,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 data.user_puk.update(buf, (short)0, data.user_puk_length);
                 JCSystem.commitTransaction();
                 data.user_puk.resetAndUnblock();
+                Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
                 break;
 
             case Constants.TAG_KEY_DERIVATION_FUNCTION:
@@ -1349,17 +1357,21 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             byte i = 0;
             JCSystem.beginTransaction();
-            while(data.digital_signature_counter[(byte)(data.digital_signature_counter.length - i - 1)] == (byte)0xff) {
+            while((i < (byte)data.digital_signature_counter.length) &&
+                  (data.digital_signature_counter[(byte)(data.digital_signature_counter.length - i - 1)] == (byte)0xff)) {
                 ++i;
             }
-            if(i < data.digital_signature_counter.length) {
-                ++data.digital_signature_counter[(byte)(data.digital_signature_counter.length - i - 1)];
-                if(i > 0) {
-                    --i;
-                    Util.arrayFillNonAtomic(data.digital_signature_counter,
-                                            (short)(data.digital_signature_counter.length - i - 1),
-                                            (byte)(i + 1), (byte)0);
-                }
+            if(i >= (byte)data.digital_signature_counter.length) {
+                JCSystem.abortTransaction();
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+                return (short)0;
+            }
+            ++data.digital_signature_counter[(byte)(data.digital_signature_counter.length - i - 1)];
+            if(i > 0) {
+                --i;
+                Util.arrayFillNonAtomic(data.digital_signature_counter,
+                                        (short)(data.digital_signature_counter.length - i - 1),
+                                        (byte)(i + 1), (byte)0);
             }
             JCSystem.commitTransaction();
 
@@ -1696,6 +1708,15 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             } catch (ISOException e) {
                 sw = e.getReason();
+            }
+
+            /* Cryptographic Audit: Zeroize PIN / PUK materials in transients.buffer */
+            if((apdubuf[ISO7816.OFFSET_INS] == Constants.INS_VERIFY) ||
+               (apdubuf[ISO7816.OFFSET_INS] == Constants.INS_CHANGE_REFERENCE_DATA) ||
+               (apdubuf[ISO7816.OFFSET_INS] == Constants.INS_RESET_RETRY_COUNTER)) {
+                if(lc > 0) {
+                    Util.arrayFillNonAtomic(transients.buffer, (short)0, lc, (byte)0);
+                }
             }
 
             if(transients.secureMessagingOk()) {
