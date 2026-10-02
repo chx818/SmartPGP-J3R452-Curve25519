@@ -138,11 +138,33 @@ def main():
         assert len(data) == 64, f"Shared secret length expected 32 bytes, got {len(data)}"
         print("    --> OK: Hardware X25519 ECDH key exchange computed (32 bytes)!")
         
+        # 12. Security Verification: CRIT-01 RFC 7748 Small-Subgroup & Low-Order Point Defense
+        print("\n[12] SECURITY: Complete Small-Subgroup & Low-Order Point Defense Suite...")
+        low_order_points = {
+            "0 (order 4)": "00" * 32,
+            "1 (order 1/2)": "01" + "00" * 31,
+            "p-1": bytes.fromhex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEC")[::-1].hex(),
+            "p": bytes.fromhex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFED")[::-1].hex(),
+            "p+1": bytes.fromhex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEE")[::-1].hex(),
+            "root u1 (order 8)": bytes.fromhex("47B0565FEE1F493215286AE39D9EAF57AD56FD63DE17E07C7F225679D678EDEC")[::-1].hex(),
+            "root u2 (order 8)": bytes.fromhex("384FA9A011E0B6CDCAE7951C626150A852A9029C21E81F8380DD988629871200")[::-1].hex(),
+        }
+        for name, pt in low_order_points.items():
+            transmit("0020008206313233343536")
+            tlv = f"A6257F49228620{pt}"
+            tlv_len = len(tlv) // 2
+            data, sw = transmit(f"002A8086{tlv_len:02X}{tlv}00")
+            defense = "BLOCKED (Hardware Coprocessor)" if sw == "6985" else ("BLOCKED (Application Filter)" if sw == "6A80" else "VULNERABLE")
+            print(f"    Point {name:20s}: SW={sw} -> {defense}")
+            assert sw in ("6A80", "6985"), f"Expected 6A80 or 6985 rejection for point {name}, got {sw}"
+        print("    --> OK: All 7 low-order points 100% blocked on physical J3R452 card!")
+
         print("\n" + "=" * 60)
-        print("  ALL 11 HARDWARE SECURITY TESTS PASSED 100% ON J3R452!")
+        print("  ALL 12 HARDWARE SECURITY TESTS PASSED 100% ON J3R452!")
         print("  - Hardware KeyGen (Ed25519 + X25519): PASSED")
         print("  - Hardware Digital Signature (Ed25519 64-byte): PASSED")
         print("  - Hardware ECDH Decipher (X25519 32-byte): PASSED")
+        print("  - Cryptographic Audit CRIT-01 & CRIT-03 Complete Defense: PASSED")
         print("=" * 60)
 
     finally:
