@@ -68,8 +68,8 @@ The whole applet and build/install path were re-reviewed, including unchanged co
 
 1. **Hardware Delegation & Java-Level Branch Reduction**:
    - Scalar multiplication and EdDSA signing use the NXP services exposed by the wrapper.
-   - CMAC subkey reduction and shifting avoid Java-level branches on secret-derived bits. This is not a proof of constant-time or leakage-free execution on the card.
-   - CMAC streaming tests cover block boundaries and empty final input. Physical power/EM and fault-injection evaluation has not been completed.
+   - Since package 1.4, CMAC uses the card's `Signature.ALG_AES_CMAC_128` service. Java no longer derives or stores K1/K2 or computes CMAC chaining blocks. There is no silent software fallback if the service is unavailable; this reduces application-level secret handling but does not prove native constant-time or leakage-free execution.
+   - CMAC adapter and native tests cover 128/256-bit keys, block boundaries, truncation and empty final input. Physical power/EM and fault-injection evaluation has not been completed.
 2. **RFC 7748 §6 Zero Shared Secret & Small-Subgroup Detection**:
    - Uses a full-length OR accumulation to detect a zero shared secret on X25519 ECDH calculations.
    - Normalizes public X25519 inputs and rejects an all-zero shared secret, clearing the working buffer on failure.
@@ -87,7 +87,7 @@ The whole applet and build/install path were re-reviewed, including unchanged co
    - Transient RAM buffers are proactively cleared across PIN/PUK verification (`INS_VERIFY`, `INS_CHANGE_REFERENCE_DATA`, `INS_RESET_RETRY_COUNTER`), `PUT DATA` operations, and key deletion (`clearKey()`).
    - Upon applet deselect or connection reset, all transient session buffers and session keys are destroyed.
 7. **Lazy-Loaded Engines & Zero-Duplicate Cipher Architecture**:
-   - Shares a single AES engine across core applet routines, Secure Messaging (SCP11b), and CMAC verification.
+   - Shares an AES-CBC cipher across the core AES service and SCP11b encryption; a separate lazily allocated native CMAC Signature object handles MACs.
    - Heavy cryptographic engines (RSA PKCS#1 ciphers, Weierstrass EC Diffie-Hellman, SHA-variant ECDSA signers, and Curve25519 hardware engines) are lazy-loaded on-demand via cached singletons. This reduces eager allocation; available RAM and multi-applet compatibility remain card-configuration dependent.
 8. **Dual Public Key Format Compatibility**:
    - Accepts both 32-byte raw public keys and 33-byte public keys prefixed with `0x40` in the supported legacy OpenPGP card encoding.
@@ -98,7 +98,7 @@ The whole applet and build/install path were re-reviewed, including unchanged co
 
 The current tests use independent host cryptography rather than checking status words and output lengths alone:
 
-- `tests/security_host.py`: RFC 4493 CMAC vectors, 124 split positions, byte-wise updates, clearing, and six EC domain-parameter checks.
+- `tests/security_host.py`: Native-CMAC adapter with independent AES-128/256 references, 772 split/truncation cases, byte/short updates, failure cleanup, and six EC domain-parameter checks.
 - `tests/security_card.py`: Ed25519/X25519 generation and import, known answers, low-order inputs, authorization failures, six ECDSA curves, RSA-2048, AES, certificate/DO updates and SCP11b. The completed run had 86 checks, including repeated chaining checks.
 - `tests/security_extended_card.py`: P-256 ECDH, RSA-3072/4096 signatures and RSA-2048 CRT import with independent verification.
 - `tests/test_rsa_stream_parser.py`: executes the actual Java streaming parser on the host, covering fragmentation, every RSA-4096 truncation point and abort cleanup.
@@ -244,8 +244,8 @@ RSA-3072/4096 的格式3导入现在逐个分量写入密钥对象，全部七�
 
 1. **硬件密码服务与 Java 层分支减少**：
    - 标量乘法与 EdDSA 签名通过包装库使用 NXP 卡内密码服务。
-   - CMAC 子密钥约减与移位避免依赖秘密派生位的 Java 条件分支；这不能单独证明原生实现恒时或无物理泄漏。
-   - AES-128/256 CMAC 移位与子密钥约减消除 Java 层秘密相关分支，处理空尾块与分段边界，并有独立向量验证。本项目尚未完成物理功耗／EM／故障注入评估。
+   - 自包版本1.4起，CMAC改用卡原生 `Signature.ALG_AES_CMAC_128` 服务，Java不再派生/保存K1/K2，也不自行计算CMAC链式分组。服务不可用时拒绝建立会话，不静默回退软件实现；这减少应用层秘密处理，不证明原生实现恒时或无物理泄漏。
+   - AES-128/256原生CMAC适配器覆盖空尾块、分段边界和截断MAC，并有独立参考与实卡验证。本项目尚未完成物理功耗／EM／故障注入评估。
 2. **RFC 7748 §6 全零共享秘密与低阶点防御**：
    - 对 X25519 公开输入规范化；遍历全部输出字节作 OR 聚合，检测全零共享秘密并拒绝，失败时清理工作缓冲。
 3. **原子生命周期与掉电防撕裂保护 (Sentinel Flag)**：
@@ -260,7 +260,7 @@ RSA-3072/4096 的格式3导入现在逐个分量写入密钥对象，全部七�
    - 在 PIN/PUK 验证（`INS_VERIFY`、`INS_CHANGE_REFERENCE_DATA`、`INS_RESET_RETRY_COUNTER`）、`PUT DATA` 敏感属性写入以及密钥重置（`clearKey()`）路径中，主动清零 RAM 暂存缓冲与敏感持久槽位。
    - 卡片在断开或反选（Deselect）时，自动触发 `clearConnection()` 销毁所有会话密钥与 RAM 临时数据。
 7. **密码引擎按需懒加载与零冗余复用架构**：
-   - 为确保在多应用共存环境（如单卡同时部署 PIV、FIDO2、Satochip、Seedkeeper 与 VivoKey Apex OTP）下极限节约 JCOP 内存，SmartPGP 将单一 AES 引擎在应用主指令、安全信道（SM）及 CMAC 验签之间高度复用。
+   - 为确保在多应用共存环境（如单卡同时部署 PIV、FIDO2、Satochip、Seedkeeper 与 VivoKey Apex OTP）下极限节约 JCOP 内存，SmartPGP在应用AES服务与SM加密之间复用AES-CBC对象，另按需分配一个原生CMAC Signature对象。
    - 占资源的复杂硬件密码引擎（RSA PKCS#1 密码机、标准 EC 椭圆曲线 Diffie-Hellman、SHA 散列族 ECDSA 签名器以及 Curve25519 引擎）均采用按需懒加载的静态单例模式。这样可以减少提前分配；多应用共存的 RAM 余量仍需针对实际卡配置验证。
 8. **双公钥格式原生兼容**：
    - 支持对应 legacy OpenPGP 卡编码的 32 字节裸公钥和带 `0x40` 前缀的 33 字节公钥。
@@ -271,7 +271,7 @@ RSA-3072/4096 的格式3导入现在逐个分量写入密钥对象，全部七�
 
 当前测试通过独立主机密码库验证结果，不只检查状态字和长度：
 
-- `tests/security_host.py`：RFC 4493 CMAC 向量、124 种分段、逐字节更新、清理及六条曲线的基本参数检查。
+- `tests/security_host.py`：原生CMAC适配器的AES-128/256独立参考、772种分段/截断组合、byte/short更新、异常清理及六条曲线基本参数检查。
 - `tests/security_card.py`：Ed25519/X25519 生成和导入、已知答案、低阶输入、权限负测试、六条 ECDSA 曲线、RSA-2048、AES、证书／DO 更新与 SCP11b。已完成的运行包含 86 条检查，其中有重复的命令链分片检查。
 - `tests/security_extended_card.py`：P-256 ECDH、RSA-3072/4096 签名和 RSA-2048 CRT 导入，均采用独立结果校验。
 - `tests/test_rsa_stream_parser.py`：主机上执行实际Java流式解析器，覆盖分片、RSA-4096全部截断位置及异常清理。
@@ -353,3 +353,9 @@ gpg/card> generate
 
 - **[github-af/SmartPGP](https://github.com/github-af/SmartPGP)** & **[ANSSI-FR/SmartPGP](https://github.com/ANSSI-FR/SmartPGP)**: 原始 Java Card OpenPGP v3.4 规范实现 © ANSSI 及 SmartPGP 开源贡献者。
 - **[suut/Curve25519-JavaCard](https://github.com/suut/Curve25519-JavaCard)**: NXP J3R452 底层硬件 Curve25519 协处理器驱动库 © suut。
+
+### Native CMAC coverage / 原生CMAC覆盖
+
+Package 1.4 requires the native CMAC service for SCP11b; unsupported cards fail session setup without software fallback. `tests/security_sm_curves_card.py` independently verifies SCP11b on all six supported EC curves, including AES-256 sessions. It resets the applet and is destructive. A native service passing vectors does not establish its physical side-channel resistance.
+
+1.4的SCP11b要求卡支持原生CMAC；缺少该服务时会话建立失败，不软件降级。`tests/security_sm_curves_card.py`独立验证全部六条支持曲线的SCP11b，包含AES-256会话；测试会重置app、破坏现有数据，限专用测试卡。原生服务通过向量不等于已完成物理侧信道评估。

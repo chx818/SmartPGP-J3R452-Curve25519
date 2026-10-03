@@ -277,27 +277,6 @@ public final class Common {
         return (short)((bits / 8) + (short)(((bits % 8) == 0) ? 0 : 1));
     }
 
-    protected static final void arrayLeftShift(final byte[] inBuf, short inOff,
-                                               final byte[] outBuf, short outOff,
-                                               final short len) {
-        if(len > 0) {
-            outBuf[outOff++] = (byte)(inBuf[inOff++] << 1);
-            for(short i = 1; i < len; ++i) {
-                outBuf[(short)(outOff - 1)] |= (byte)((inBuf[inOff] >>> 7) & 1);
-                outBuf[outOff++] = (byte)(inBuf[inOff++] << 1);
-            }
-        }
-    }
-
-    protected static final void arrayXor(final byte[] inBuf1, short inOff1,
-                                         final byte[] inBuf2, short inOff2,
-                                         final byte[] outBuf, short outOff,
-                                         final short len) {
-        for(short i = 0; i < len; ++i) {
-            outBuf[outOff++] = (byte)(inBuf1[inOff1++] ^ inBuf2[inOff2++]);
-        }
-    }
-
     protected static final short writeAlgorithmInformation(final ECCurves ec,
                                                            final byte key_tag, final boolean is_dec,
                                                            final byte[] buf, short off) {

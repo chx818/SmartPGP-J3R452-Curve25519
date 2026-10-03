@@ -23,16 +23,22 @@ def aes(key,data,iv=None,decrypt=False):
     op=c.decryptor() if decrypt else c.encryptor();return op.update(data)+op.finalize()
 
 class SmSession:
-    def __init__(self,suite):
+    def __init__(self,suite,curve=None):
         self.suite=suite
+        curve=curve or ec.SECP256R1()
+        keylen=16 if curve.key_size<512 else 32
+        def tl(tag,value):
+            n=len(value)
+            encoded=bytes([n]) if n<128 else b'\x81'+bytes([n])
+            return tag+encoded+value
         blob=suite.pub(0xa6);static=dict(helper.tlv(dict(helper.tlv(blob))[0x7f49]))[0x86]
-        host=ec.generate_private_key(ec.SECP256R1());hp=host.public_key().public_bytes(Encoding.X962,PublicFormat.UncompressedPoint)
-        request=bytes.fromhex('a60d9002110095013c8001888101105f4941')+hp
+        host=ec.generate_private_key(curve);hp=host.public_key().public_bytes(Encoding.X962,PublicFormat.UncompressedPoint)
+        request=bytes.fromhex('a60d9002110095013c8001888101')+bytes([keylen])+tl(b'\x5f\x49',hp)
         reply=suite.need(helper.apdu(0x88,1,0,request));parts=dict(helper.tlv(reply));ep=parts[0x5f49];receipt=parts[0x86]
-        shared=host.exchange(ec.ECDH(),ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(),ep))+host.exchange(ec.ECDH(),ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(),static))
-        material=b''.join(hashlib.sha256(shared+i.to_bytes(4,'big')+bytes.fromhex('3c8810')).digest() for i in (1,2))
-        kr,self.ke,self.km,self.krm=[material[i:i+16] for i in range(0,64,16)]
-        if not hmac.compare_digest(receipt,cmac(kr,request+bytes.fromhex('5f4941')+ep)):raise RuntimeError('Bad SM receipt')
+        shared=host.exchange(ec.ECDH(),ec.EllipticCurvePublicKey.from_encoded_point(curve,ep))+host.exchange(ec.ECDH(),ec.EllipticCurvePublicKey.from_encoded_point(curve,static))
+        material=b''.join(hashlib.sha256(shared+i.to_bytes(4,'big')+bytes([0x3c,0x88,keylen])).digest() for i in range(1,(4*keylen)//32+1))
+        kr,self.ke,self.km,self.krm=[material[i:i+keylen] for i in range(0,4*keylen,keylen)]
+        if not hmac.compare_digest(receipt,cmac(kr,request+tl(b'\x5f\x49',ep))):raise RuntimeError('Bad SM receipt')
         self.chain=receipt;self.counter=0
     def command(self,ins,p1,p2,plain=b'',raw_padded=None,tamper_mac=None):
         self.counter+=1;encrypted=b''

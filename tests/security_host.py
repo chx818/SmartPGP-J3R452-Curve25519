@@ -1,8 +1,6 @@
-"""Offline audit evidence, no reader access and no production source edits.
-Requires Python cryptography and a JDK. This is NOT a Java Card simulator.
-Runs original CmacKey/CmacSignature with narrow JCE-backed API doubles;
-Common's two array helpers are extracted verbatim from the audited source.
-Outputs observations (including defects), not a claim that the project is safe.
+"""Offline applet crypto regression. Requires cryptography and a JDK.
+Uses independent CMAC references and the actual Java native-CMAC adapter with API
+doubles; curve parameter checks use host EC. No card or physical SCA simulation.
 """
 import argparse
 import hashlib
@@ -57,108 +55,9 @@ def ladder(k, u):
     return (x2 * pow(z2, p-2, p) % p).to_bytes(32, "little")
 
 
-def java_checks(jdk):
-    work = ROOT / "build/host-security-tests"
-    work.mkdir(exist_ok=True)
-    common = (SRC / "Common.java").read_text(encoding='utf-8')
-    helpers = "\n".join(method(common, "    protected static final void " + n)
-                         for n in ["arrayLeftShift(", "arrayXor("])
-    files = {
-      "fr/anssi/smartpgp/Common.java": "package fr.anssi.smartpgp; public class Common {" + helpers + "}",
-      "fr/anssi/smartpgp/Constants.java": "package fr.anssi.smartpgp; public class Constants { static final short AES_BLOCK_SIZE=16;}",
-      "javacard/framework/JCSystem.java": """package javacard.framework;
-public class JCSystem { public static final byte CLEAR_ON_DESELECT=2;
-public static byte[] makeTransientByteArray(short n, byte e){return new byte[n];} }""",
-      "javacard/framework/Util.java": """package javacard.framework;
-public class Util {
-public static short makeShort(byte a,byte b){return (short)(((a&255)<<8)|(b&255));}
-public static short arrayCopyNonAtomic(byte[] a,short b,byte[] c,short d,short e){System.arraycopy(a,b,c,d,e);return (short)(d+e);}
-public static short arrayFillNonAtomic(byte[] a,short b,short c,byte d){java.util.Arrays.fill(a,b,b+c,d);return (short)(b+c);}
-}""",
-      "javacard/security/CryptoException.java": """package javacard.security;
-public class CryptoException extends RuntimeException {
-public static final short UNINITIALIZED_KEY=2, INVALID_INIT=4, ILLEGAL_USE=5, ILLEGAL_VALUE=1;
-public static void throwIt(short s){throw new CryptoException();}}
-""",
-      "javacard/security/AESKey.java": """package javacard.security;
-public class AESKey { public byte[] value; private boolean initialized;
-public AESKey(short bits){value=new byte[bits/8];}
-public void setKey(byte[] b,short off){System.arraycopy(b,off,value,0,value.length);initialized=true;}
-public short getSize(){return (short)(value.length*8);}
-public boolean isInitialized(){return initialized;}
-public void clearKey(){java.util.Arrays.fill(value,(byte)0);initialized=false;}}
-""",
-      "javacard/security/KeyBuilder.java": """package javacard.security;
-public class KeyBuilder { public static final byte TYPE_AES_TRANSIENT_DESELECT=15;
-public static AESKey buildKey(byte t,short bits,boolean enc){return new AESKey(bits);}}
-""",
-      "javacardx/crypto/Cipher.java": """package javacardx.crypto;
-import javacard.security.AESKey;
-public class Cipher {
- public static final byte MODE_ENCRYPT=1; private javax.crypto.Cipher impl;
- public void init(AESKey key,byte mode) {try {
- impl=javax.crypto.Cipher.getInstance("AES/CBC/NoPadding");
- impl.init(javax.crypto.Cipher.ENCRYPT_MODE,new javax.crypto.spec.SecretKeySpec(key.value,"AES"),new javax.crypto.spec.IvParameterSpec(new byte[16]));
- }catch(Exception e){throw new RuntimeException(e);}}
- public short doFinal(byte[] a,short off,short len,byte[] out,short dest){try{
- byte[] v=impl.doFinal(a,off,len);System.arraycopy(v,0,out,dest,v.length);return (short)v.length;
- }catch(Exception e){throw new RuntimeException(e);}}
-}
-""",
-      "fr/anssi/smartpgp/AuditHarness.java": r"""package fr.anssi.smartpgp;
-import java.util.Arrays;
-import javacardx.crypto.Cipher;
-public class AuditHarness {
- static byte[] hex(String s){byte[] b=new byte[s.length()/2];for(int i=0;i<b.length;i++)b[i]=(byte)Integer.parseInt(s.substring(i*2,i*2+2),16);return b;}
- static String hex(byte[] b){StringBuilder s=new StringBuilder();for(byte v:b)s.append(String.format("%02x",v&255));return s.toString();}
- public static void main(String[] args){
- Cipher cipher=new Cipher(); CmacKey key=new CmacKey((short)16);
- key.setKey(cipher,hex("2b7e151628aed2a6abf7158809cf4f3c"),(short)0);
- CmacSignature sig=new CmacSignature(cipher);
- byte[] msg=hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
- int[] lens={0,16,40,64};
- String[] expected={"bb1d6929e95937287fa37d129b756746","070a16b46b4d4144f79bdd9dd04a287c","dfa66747de9ae63030ca32611497c827","51f0bebf7e3b9d92fc49741779363cfe"};
- int checked=0;
- for(int j=0;j<lens.length;j++) {
-  for(int split=0;split<=lens[j];split++) {
-   byte[] out=new byte[16]; sig.init(key);
-   if(split>0)sig.update(msg,(short)0,(short)split);
-   sig.sign(msg,(short)split,(short)(lens[j]-split),out,(short)0,(short)16);
-   boolean ok=hex(out).equals(expected[j]); checked++;
-   if(split==0||!ok)System.out.println("cmac length="+lens[j]+" split="+split+" ok="+ok+" output="+hex(out));
-  }
- }
- System.out.println("cmac_split_cases="+checked);
- for(int j=0;j<lens.length;j++) {
-  byte[] out=new byte[16];sig.init(key);
-  for(int i=0;i<lens[j];i++)sig.updateByte(msg[i]);
-  sig.sign(null,(short)0,(short)0,out,(short)0,(short)16);
-  System.out.println("cmac_byte_updates="+lens[j]+" ok="+hex(out).equals(expected[j]));
- }
- // The private compute buffers can retain state when clear() is used mid-stream.
- sig.init(key);sig.update(msg,(short)0,(short)17);sig.clear();
- try { java.lang.reflect.Field f=CmacSignature.class.getDeclaredField("block");f.setAccessible(true);
- System.out.println("cmac_clear_block_is_zero="+Arrays.equals((byte[])f.get(sig),new byte[16]));
- }catch(Exception e){throw new RuntimeException(e);}
- key.setKey(cipher,hex("2b7e151628aed2a6abf7158809cf4f3c"),(short)0);
- sig.init(key);key.key.clearKey();sig.clear();
- System.out.println("cmac_clear_uninitialized_subkeys_is_zero="+(Arrays.equals(key.k1,new byte[16])&&Arrays.equals(key.k2,new byte[16])));
- }
-}
-"""
-    }
-    for n in ["CmacKey", "CmacSignature"]:
-        files[f"fr/anssi/smartpgp/{n}.java"] = (SRC / (n+".java")).read_text(encoding='utf-8')
-    for name, text in files.items():
-        p = work / name
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, encoding="utf-8")
-    classes = work / "classes"
-    classes.mkdir(exist_ok=True)
-    javac, java = (str(Path(jdk)/"bin"/(n+(".exe" if os.name=="nt" else ""))) for n in ["javac","java"])
-    subprocess.run([javac,"-encoding","UTF-8","-d",str(classes)]+[str(work/n) for n in files],check=True,capture_output=True,text=True)
-    return (subprocess.check_output([java,"-cp",str(classes),"fr.anssi.smartpgp.AuditHarness"],text=True)).splitlines()
-
+# Adapter sequencing is tested using independent host cryptography; the native
+# implementation itself is additionally exercised by on-card SM/probe tests.
+from native_cmac_host import java_checks
 
 
 def curve_checks():
