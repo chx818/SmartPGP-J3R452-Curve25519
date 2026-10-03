@@ -356,6 +356,6 @@ gpg/card> generate
 
 ### Native CMAC coverage / 原生CMAC覆盖
 
-Package 1.4 requires the native CMAC service for SCP11b; unsupported cards fail session setup without software fallback. `tests/security_sm_curves_card.py` independently verifies SCP11b on all six supported EC curves, including AES-256 sessions. It resets the applet and is destructive. A native service passing vectors does not establish its physical side-channel resistance.
+Package 1.4 requires the native CMAC service for SCP11b; unsupported cards fail session setup without software fallback. `tests/security_sm_curves_card.py` independently verifies SCP11b on all six supported EC curves, including AES-256 sessions. It resets the applet and is destructive. A native service passing vectors does not establish its physical side-channel resistance. `tests/security_kdf_card.py` covers the card-side 32/64-byte derived-PIN format transitions and restores defaults; it is destructive and is not a complete host S2K interoperability test.
 
-1.4的SCP11b要求卡支持原生CMAC；缺少该服务时会话建立失败，不软件降级。`tests/security_sm_curves_card.py`独立验证全部六条支持曲线的SCP11b，包含AES-256会话；测试会重置app、破坏现有数据，限专用测试卡。原生服务通过向量不等于已完成物理侧信道评估。
+1.4的SCP11b要求卡支持原生CMAC；缺少该服务时会话建立失败，不软件降级。`tests/security_sm_curves_card.py`独立验证全部六条支持曲线的SCP11b，包含AES-256会话；测试会重置app、破坏现有数据，限专用测试卡。原生服务通过向量不等于已完成物理侧信道评估。`tests/security_kdf_card.py`验证卡侧32/64字节派生PIN格式切换并恢复默认状态，是破坏性测试，不代表完整主机S2K互操作验收。
