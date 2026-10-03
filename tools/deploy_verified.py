@@ -1,45 +1,108 @@
-"""Replace ONLY SmartPGP on an explicitly selected reader after checking build hashes.
-Default profile requires SM for contactless sensitive commands. --contactless-plain
-is an explicit compatibility exception. Uses default GP keys only if GP is not configured.
+﻿"""Install this SmartPGP applet only. No card-production configuration is read.
+Uses GP's configured key environment. The shipped GP defaults apply if none is set.
+Existing OpenPGP data is erased only with --replace-smartpgp.
 """
-import argparse,hashlib,json,os,re,subprocess,sys
+import argparse
+import hashlib
+import json
+import os
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-if hasattr(sys.stdout,'reconfigure'):sys.stdout.reconfigure(encoding='utf-8')
-def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--reader',required=True);p.add_argument('--replace-smartpgp',action='store_true');p.add_argument('--contactless-plain',action='store_true');args=p.parse_args()
- if not args.replace_smartpgp:p.error('--replace-smartpgp is required: existing OpenPGP keys will be erased')
- m=json.loads((ROOT/'dist/build-manifest.json').read_text());cap=ROOT/'dist/SmartPGPApplet.cap'
- def digest(file):return hashlib.sha256(file.read_bytes()).hexdigest()
- if digest(cap)!=m['cap_sha256']:raise RuntimeError('CAP does not match verified build')
- for n,h in m['source_sha256'].items():
-  if hashlib.sha256((ROOT/n).read_bytes().replace(b'\r\n',b'\n')).hexdigest()!=h:raise RuntimeError('Source changed since verified build: '+n)
- for n,h in m['dependencies'].items():
-  if digest(ROOT/n)!=h:raise RuntimeError('Dependency changed: '+n)
- runner=ROOT/'tools/gprun.bat';log=[]
- def run(*argv):
-  cmd=[str(runner),'-r',args.reader,*map(str,argv)]
-  result=subprocess.run(cmd,capture_output=True)
-  text=(result.stdout+result.stderr).decode('utf-8',errors='replace');print(text,flush=True)
-  # Public test management key must not appear in archived logs.
-  text=re.sub(r'404142434445464748494A4B4C4D4E4F','[default test GP key]',text,flags=re.I)
-  log.append({'args':list(map(str,argv)),'exit':result.returncode,'output':text})
-  if result.returncode:raise RuntimeError('GP command failed; stopped without touching other applications')
-  return text
- report=ROOT/'reports/2026-10-03/deployment.json';report.parent.mkdir(exist_ok=True,parents=True)
- try:
-  before=run('--list');apps=re.findall(r'^APP: ([0-9A-F]+)',before,re.M)
-  if 'PKG: FF00025519 ' not in before:raise RuntimeError('Required wrapper is missing; provision trusted wrapper explicitly')
-  targets=[]
-  for match in re.finditer(r'^APP: ([0-9A-F]+)[^\n]*\n((?:[ \t]+[^\n]*\n)*)',before.replace('\r',''),re.M):
-   origin=re.search(r'^\s+From:\s+([0-9A-F]+)',match.group(2),re.M)
-   if origin and origin.group(1)=='D27600012401':targets.append(match.group(1))
-  for aid in targets:run('--delete',aid)
-  if 'PKG: D27600012401 ' in before:run('--delete','D27600012401')
-  run('--install',cap,'--params','00' if args.contactless_plain else '01')
-  after=run('--list');remaining=set(re.findall(r'^APP: ([0-9A-F]+)',after,re.M))
-  if not set(apps).difference(targets).issubset(remaining):raise RuntimeError('Unexpected registry difference')
-  if 'APP: D276000124010304AFAF000000000000 ' not in after:raise RuntimeError('New applet missing')
- finally:
-  report.write_text(json.dumps({'cap_sha256':m['cap_sha256'],'profile':'contactless-plain' if args.contactless_plain else 'strict-contactless','steps':log},indent=2),encoding='utf-8')
-if __name__=='__main__':main()
+import re
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = 'D27600012401'
+INSTANCE = 'D276000124010304AFAF000000000000'
+WRAPPER = 'FF00025519'
+
+def verify_files(root=ROOT):
+    manifest = json.loads((root/'dist/build-manifest.json').read_text(encoding='utf-8-sig'))
+    for name in ('dist/SmartPGPApplet.cap', 'prebuilt/SmartPGPApplet.cap'):
+        if hashlib.sha256((root/name).read_bytes()).hexdigest() != manifest['cap_sha256']:
+            raise RuntimeError('CAP does not match verified build: '+name)
+    for name, expected in manifest['source_sha256'].items():
+        if hashlib.sha256((root/name).read_bytes().replace(b'\r\n', b'\n')).hexdigest() != expected:
+            raise RuntimeError('Source changed since verified build: '+name)
+    for name, expected in manifest['dependencies'].items():
+        if hashlib.sha256((root/name).read_bytes()).hexdigest() != expected:
+            raise RuntimeError('Dependency changed since verified build: '+name)
+    return manifest
+
+def parse_registry(text):
+    entries={};current=None
+    for line in text.replace('\r','').splitlines():
+        m=re.match(r'^(APP|PKG|ISD): ([0-9A-Fa-f]+) \(([^)]+)\)',line)
+        if m:
+            key=(m[1],m[2].upper())
+            if key in entries: raise RuntimeError('Duplicate registry entry')
+            current={'state':m[3]};entries[key]=current
+        elif current is not None:
+            m=re.match(r'^\s+(From|Version):\s+(\S+)',line)
+            if m:current[m[1].lower()]=m[2].upper()
+    if not any(k[0]=='ISD' for k in entries):raise RuntimeError('Incomplete GP registry; stopping')
+    return entries
+
+def installation_plan(entries, root, version, replace=False, strict=False):
+    existing=[k[1] for k,v in entries.items() if k[0]=='APP' and v.get('from')==PACKAGE]
+    if ('APP',INSTANCE) in entries and entries[('APP',INSTANCE)].get('from')!=PACKAGE:
+        raise RuntimeError('Target AID belongs to another package')
+    if (existing or ('PKG',PACKAGE) in entries) and not replace:
+        raise RuntimeError('SmartPGP already present. --replace-smartpgp explicitly erases its keys/data.')
+    wrapper=entries.get(('PKG',WRAPPER))
+    if wrapper and (wrapper.get('version')!='1.0' or wrapper['state']!='LOADED'):
+        raise RuntimeError('Unexpected Curve25519 package version/state; not replacing it')
+    result=[]
+    if not wrapper:result.append(['--load',str(root/'lib/Curve25519.cap')])
+    result.extend(['--delete',aid] for aid in existing)
+    if ('PKG',PACKAGE) in entries:result.append(['--delete',PACKAGE])
+    result.append(['--install',str(root/'dist/SmartPGPApplet.cap'),'--params','01' if strict else '00'])
+    return result
+
+def redact(text):
+    values=[v for k,v in os.environ.items() if k.upper().startswith('GP_KEY') and re.fullmatch(r'[0-9a-fA-F]{32,64}',v)]
+    values.append('404142434445464748494A4B4C4D4E4F')
+    for value in values:text=re.sub(re.escape(value),'[REDACTED]',text,flags=re.I)
+    return text
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--reader',default='PCD')
+    parser.add_argument('--replace-smartpgp',action='store_true')
+    group=parser.add_mutually_exclusive_group()
+    group.add_argument('--strict-contactless',action='store_true')
+    group.add_argument('--contactless-plain',action='store_true',help='Compatibility alias; already the installer default')
+    parser.add_argument('--report',type=Path,default=ROOT/'build/deployment.json')
+    args=parser.parse_args(argv)
+    if not args.reader.strip():parser.error('An explicit reader name/filter is required')
+    manifest=verify_files()
+    log=[]
+    def run(options):
+        result=subprocess.run([str(ROOT/'tools/gprun.bat'),'-r',args.reader,*options],capture_output=True)
+        text=redact((result.stdout+result.stderr).decode('utf-8',errors='replace'))
+        print(text,flush=True)
+        log.append({'arguments':options,'exit':result.returncode,'output':text})
+        if result.returncode:raise RuntimeError('GP failed; no automatic retry or continuation')
+        return text
+    complete=False
+    try:
+        before=parse_registry(run(['--list']))
+        for options in installation_plan(before,ROOT,manifest['package_version'],args.replace_smartpgp,args.strict_contactless):run(options)
+        after=parse_registry(run(['--list']))
+        if after.get(('PKG',PACKAGE),{}).get('version')!=manifest['package_version']:
+            raise RuntimeError('Installed package version mismatch')
+        instance=after.get(('APP',INSTANCE),{})
+        if instance.get('state')!='SELECTABLE' or instance.get('from')!=PACKAGE:
+            raise RuntimeError('New applet not selectable or wrong package')
+        for key,value in before.items():
+            if key[0]=='APP' and value.get('from')!=PACKAGE and after.get(key)!=value:
+                raise RuntimeError('Unexpected change to another applet registry entry')
+        complete=True
+    finally:
+        args.report.parent.mkdir(parents=True,exist_ok=True)
+        args.report.write_text(json.dumps({'completed':complete,'cap_sha256':manifest['cap_sha256'],
+            'profile':'strict-contactless' if args.strict_contactless else 'contactless-plain','steps':log},indent=2),encoding='utf-8')
+
+if __name__=='__main__':
+    if hasattr(sys.stdout,'reconfigure'):sys.stdout.reconfigure(encoding='utf-8')
+    main()

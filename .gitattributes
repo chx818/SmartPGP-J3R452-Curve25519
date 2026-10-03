@@ -6,8 +6,3 @@
 *.cap binary
 *.jar binary
 *.npz binary
-
-audit/** -text
-reports/** -text
-
-production/evidence/** -text
