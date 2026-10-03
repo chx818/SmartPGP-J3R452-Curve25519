@@ -180,7 +180,7 @@ class Suite:
   _,sw=self.exchange(helper.apdu(0x20,0,0x83,b'12345678',False));self.check('NFC_plain_PIN_rejected_after_SM_provision',sw==0x6985)
 
 def main():
- ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--reader',required=True);ap.add_argument('--allow-key-replacement',action='store_true');ap.add_argument('--report',type=Path,default=ROOT/'reports/2026-10-03/card-regression.json');ap.add_argument('--expect-aid');args=ap.parse_args()
+ ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--reader',required=True);ap.add_argument('--allow-key-replacement',action='store_true');ap.add_argument('--report',type=Path,default=ROOT/'build/test-results/card-regression.json');ap.add_argument('--expect-aid');args=ap.parse_args()
  if not args.allow_key_replacement:ap.error('explicit --allow-key-replacement is required')
  c=Card(args.reader);s=Suite(c);report=args.report;report.parent.mkdir(parents=True,exist_ok=True);completed=False
  try:

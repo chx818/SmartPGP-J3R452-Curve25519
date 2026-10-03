@@ -30,5 +30,6 @@ def main():
   ok=True
  finally:
   c.close();manifest=json.loads((ROOT/'dist/build-manifest.json').read_text())
-  (ROOT/'reports/2026-10-03/card-extended.json').write_text(json.dumps({'completed':ok,'tested_cap_sha256':manifest['cap_sha256'],'results':s.results},indent=2),encoding='utf-8')
+  report=ROOT/'build/test-results/card-extended.json';report.parent.mkdir(parents=True,exist_ok=True)
+  report.write_text(json.dumps({'completed':ok,'tested_cap_sha256':manifest['cap_sha256'],'results':s.results},indent=2),encoding='utf-8')
 if __name__=='__main__':main()
