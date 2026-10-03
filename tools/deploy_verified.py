@@ -1,4 +1,4 @@
-﻿"""Install this SmartPGP applet only. No card-production configuration is read.
+"""Install this SmartPGP applet only. No card-production configuration is read.
 Uses GP's configured key environment. The shipped GP defaults apply if none is set.
 Existing OpenPGP data is erased only with --replace-smartpgp.
 """
@@ -11,23 +11,21 @@ import re
 import subprocess
 import sys
 
+# Support both direct execution and import-based offline tests.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_support import verify_release
+
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = 'D27600012401'
 INSTANCE = 'D276000124010304AFAF000000000000'
 WRAPPER = 'FF00025519'
 
 def verify_files(root=ROOT):
-    manifest = json.loads((root/'dist/build-manifest.json').read_text(encoding='utf-8-sig'))
-    for name in ('dist/SmartPGPApplet.cap', 'prebuilt/SmartPGPApplet.cap'):
-        if hashlib.sha256((root/name).read_bytes()).hexdigest() != manifest['cap_sha256']:
-            raise RuntimeError('CAP does not match verified build: '+name)
-    for name, expected in manifest['source_sha256'].items():
-        if hashlib.sha256((root/name).read_bytes().replace(b'\r\n', b'\n')).hexdigest() != expected:
-            raise RuntimeError('Source changed since verified build: '+name)
-    for name, expected in manifest['dependencies'].items():
-        if hashlib.sha256((root/name).read_bytes()).hexdigest() != expected:
-            raise RuntimeError('Dependency changed since verified build: '+name)
-    return manifest
+    # Source commit, locked dependencies, canonical whole-file CAP and checksum file
+    # must all match before any GP connection or deletion can take place.
+    return verify_release(root)
+
 
 def parse_registry(text):
     entries={};current=None
