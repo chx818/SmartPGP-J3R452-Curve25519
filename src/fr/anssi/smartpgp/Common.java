@@ -250,8 +250,8 @@ public final class Common {
         short result=0;
         for(short i=1;i<=Constants.AES_BLOCK_SIZE;++i) {
             short value=(short)(buf[(short)(len-i)] & 0xff);
-            short zero=(short)(((value-1) >> 8) & 1);
-            short marker=(short)((((value ^ 0x80)-1) >> 8) & 1);
+            short zero=(short)(((short)(value-1) >> 8) & 1);
+            short marker=(short)(((short)((short)(value ^ 0x80)-1) >> 8) & 1);
             short choose=(short)(searching & marker);
             invalid |= (short)(searching & (1 ^ zero) & (1 ^ marker));
             short mask=(short)-choose;
