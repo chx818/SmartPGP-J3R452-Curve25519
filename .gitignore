@@ -6,3 +6,20 @@ build/
 .vscode/
 *.log
 *.tmp
+
+__pycache__/
+
+# Private card production tools and configurations
+production/
+
+# Security audit reports, test plans, and evidence
+audit/
+reports/
+evidence/
+*audit*
+*report*
+*REPORT*
+*.zh-CN.md
+security-audit-report.md
+REPAIR-REPORT*.md
+temp_old_readme.md

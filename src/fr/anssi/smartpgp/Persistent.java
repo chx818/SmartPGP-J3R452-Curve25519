@@ -75,6 +75,7 @@ public final class Persistent {
 
 
     protected AESKey aes_key;
+    protected boolean aes_key_valid;
 
 
     protected final byte[] key_derivation_function;
@@ -142,20 +143,22 @@ public final class Persistent {
     }
 
     protected void reset(final boolean isRegistering) {
+        isTerminated = true;
+        aes_key_valid = false;
         for(byte i = 0; i < pgp_keys.length; ++i) {
             pgp_keys[i].reset(isRegistering);
         }
 
         if(login_length > 0) {
             Common.beginTransaction(isRegistering);
-            Util.arrayFillNonAtomic(login, (short)0, login_length, (byte)0);
+            Common.arrayFillAtomic(login, (short)0, login_length, (byte)0);
             login_length = (short)0;
             Common.commitTransaction(isRegistering);
         }
 
         if(url_length > 0) {
             Common.beginTransaction(isRegistering);
-            Util.arrayFillNonAtomic(url, (short)0, url_length, (byte)0);
+            Common.arrayFillAtomic(url, (short)0, url_length, (byte)0);
             url_length = (short)0;
             Common.commitTransaction(isRegistering);
         }
@@ -166,16 +169,16 @@ public final class Persistent {
 
         if(name_length > 0) {
             Common.beginTransaction(isRegistering);
-            Util.arrayFillNonAtomic(name, (short)0, name_length, (byte)0);
+            Common.arrayFillAtomic(name, (short)0, name_length, (byte)0);
             name_length = (byte)0;
             Common.commitTransaction(isRegistering);
         }
 
         Common.beginTransaction(isRegistering);
         if(lang_length > 0) {
-            Util.arrayFillNonAtomic(lang, (short)0, lang_length, (byte)0);
+            Common.arrayFillAtomic(lang, (short)0, lang_length, (byte)0);
         }
-        Util.arrayCopyNonAtomic(Constants.LANG_DEFAULT, (short)0,
+        Util.arrayCopy(Constants.LANG_DEFAULT, (short)0,
                                 lang, (short)0,
                                 (short)Constants.LANG_DEFAULT.length);
         lang_length = (byte)Constants.LANG_DEFAULT.length;
@@ -183,12 +186,12 @@ public final class Persistent {
 
         sex = Constants.SEX_NOT_APPLICABLE;
 
-        Util.arrayFillNonAtomic(digital_signature_counter, (short)0,
+        Common.arrayFillAtomic(digital_signature_counter, (short)0,
                                 (short)digital_signature_counter.length, (byte)0);
 
         Common.beginTransaction(isRegistering);
         if(do_0101_length > 0) {
-            Util.arrayFillNonAtomic(do_0101, (short)0,
+            Common.arrayFillAtomic(do_0101, (short)0,
                                     (short)do_0101.length, (byte)0);
             do_0101_length = 0;
         }
@@ -196,7 +199,7 @@ public final class Persistent {
 
         Common.beginTransaction(isRegistering);
         if(do_0102_length > 0) {
-            Util.arrayFillNonAtomic(do_0102, (short)0,
+            Common.arrayFillAtomic(do_0102, (short)0,
                                     (short)do_0102.length, (byte)0);
             do_0102_length = 0;
         }
@@ -204,7 +207,7 @@ public final class Persistent {
 
         Common.beginTransaction(isRegistering);
         if(do_0103_length > 0) {
-            Util.arrayFillNonAtomic(do_0103, (short)0,
+            Common.arrayFillAtomic(do_0103, (short)0,
                                     (short)do_0103.length, (byte)0);
             do_0103_length = 0;
         }
@@ -212,7 +215,7 @@ public final class Persistent {
 
         Common.beginTransaction(isRegistering);
         if(do_0104_length > 0) {
-            Util.arrayFillNonAtomic(do_0104, (short)0,
+            Common.arrayFillAtomic(do_0104, (short)0,
                                     (short)do_0104.length, (byte)0);
             do_0104_length = 0;
         }
@@ -229,11 +232,13 @@ public final class Persistent {
 
         Common.beginTransaction(isRegistering);
         if(key_derivation_function_length > 0) {
-            Util.arrayFillNonAtomic(key_derivation_function, (short)0, key_derivation_function_length, (byte)0);
+            Common.arrayFillAtomic(key_derivation_function, (short)0, key_derivation_function_length, (byte)0);
         }
-        Util.arrayCopyNonAtomic(Constants.KEY_DERIVATION_FUNCTION_DEFAULT, (short)0,
-                                key_derivation_function, (short)0,
-                                (short)Constants.KEY_DERIVATION_FUNCTION_DEFAULT.length);
+        if(isRegistering) {
+            Util.arrayCopyNonAtomic(Constants.KEY_DERIVATION_FUNCTION_DEFAULT,(short)0,key_derivation_function,(short)0,(short)Constants.KEY_DERIVATION_FUNCTION_DEFAULT.length);
+        } else {
+            Util.arrayCopy(Constants.KEY_DERIVATION_FUNCTION_DEFAULT,(short)0,key_derivation_function,(short)0,(short)Constants.KEY_DERIVATION_FUNCTION_DEFAULT.length);
+        }
         key_derivation_function_length = (short)Constants.KEY_DERIVATION_FUNCTION_DEFAULT.length;
         Common.commitTransaction(isRegistering);
 

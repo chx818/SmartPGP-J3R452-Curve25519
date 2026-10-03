@@ -1,0 +1,44 @@
+{
+  "package_version": "1.1",
+  "target": "3.0.5",
+  "verification": "Oracle converter verification and standalone off-card verifier completed",
+  "cap_sha256": "6ffee4ac7bdaaf328056b476834377e2bb895701d57a0355bc87e189ee0065bb",
+  "source_sha256": {
+    "src/fr/anssi/smartpgp/CmacKey.java": "869dc16fe3a68def669d025a00d87b5d35ca4fa865eeec5282d6fa0f69295e1d",
+    "src/fr/anssi/smartpgp/CmacSignature.java": "20a45f72d975c4b11c34e0ed5ca468c1b536726cc9844b28a8b026e26bec8e9a",
+    "src/fr/anssi/smartpgp/Common.java": "ba5f0ec0e57f737faf232a84fa2e135caf1de1c27c530bfec270433e73de4bb8",
+    "src/fr/anssi/smartpgp/Constants.java": "33ec100d9ae803facb46ab3e36a94d6ab0e4a6c81cfae9863a7b950a39328748",
+    "src/fr/anssi/smartpgp/ECConstants.java": "4935f6523fe5a0efc771a94f3cbe4a9583af6ce7ca43b94b3a3c3123a033f781",
+    "src/fr/anssi/smartpgp/ECCurves.java": "d11a24d79f8e5e11711975e361bfebaf0d81dd2c8cbce31ca2817082a3ad40a6",
+    "src/fr/anssi/smartpgp/ECParams.java": "6760cd8aeb9253c2cd826867f29f38ce48c8e865eb0acb8008a957472af1ea34",
+    "src/fr/anssi/smartpgp/Fingerprint.java": "22e275395e48153b2e13b6a23fbdf32a6d70eafd846840f71df6cd5ceb439b8b",
+    "src/fr/anssi/smartpgp/Persistent.java": "067b91100c967d73cc02850edcb8f9454e9070b6cd22d3063813c774832c4d6f",
+    "src/fr/anssi/smartpgp/PGPKey.java": "1f11de46acd0bd0125502459bffbd1effb2504a85b88d34b691687e8ced81cf0",
+    "src/fr/anssi/smartpgp/SecureMessaging.java": "a24e6d7ee3f2b3c00fe84e1298a86e817f9c5c3786ede8ad450c6032cd47e95c",
+    "src/fr/anssi/smartpgp/SmartPGPApplet.java": "eeb275f10def282e34b54012291cdf834a873c36c29960463d686cefb28832d8",
+    "src/fr/anssi/smartpgp/Transients.java": "71cdec0dbe149958e58af8534232bffa8b3203963d8d3bdc084dcf0bd8ed7590"
+  },
+  "dependencies": {
+    "lib/curve25519.jar": "5bc1df74c6dd30476fb854dde5465b2f44b27b3bfbf3051302d044d91b21c1e4",
+    "lib/Curve25519.cap": "f81943f52d2f22ea63d773d07736bebc34a0ed69d5c233633b043db6a8e5bb22",
+    "sdks/jc305u3_kit/lib/api_classic.jar": "686c789a2a7a0176366b45dbe1971c02b4d24f8a185ae0aee7c67fedfaed4bc0",
+    "sdks/jc310r20210706_kit/lib/tools.jar": "179b4eda4cea2d058b2c239f0d5e2b98940faced7f6b4e8287af7718df3184dd"
+  },
+  "cap_components_sha256": {
+    "fr/anssi/smartpgp/javacard/Header.cap": "646de75c090aefafa53030ce8fa70510dabbfed55f00f92f7374c85a75c2f2df",
+    "fr/anssi/smartpgp/javacard/Directory.cap": "7d5d591c9da5fb6acdd66c8577ab4545bf63772f26002ec6ce83def92355e1fa",
+    "fr/anssi/smartpgp/javacard/Applet.cap": "e6922651c7c70534c3a055cf89f1ba04e194417da7fc1a341718bc374ea04186",
+    "fr/anssi/smartpgp/javacard/Import.cap": "e28638070067c5bf0dd7289e32962a72b4671e8fe3917e6a25103435e956ff42",
+    "fr/anssi/smartpgp/javacard/ConstantPool.cap": "462dd13d2ca45e7dfa47a1e3349a42d1ce1c4cc5021e0d3c4a1214a935b6fc1c",
+    "fr/anssi/smartpgp/javacard/Class.cap": "75440f17b77466d7c9c1a137b06f0e28b86633ac836510154711af6d0d4218ee",
+    "fr/anssi/smartpgp/javacard/Method.cap": "b1334edfc842ca9b7fefdd2545d9c7bb4a7d51cbfa37623f7654b0f93ac82af6",
+    "fr/anssi/smartpgp/javacard/StaticField.cap": "17bc3981e7a9934a26ed8e01f3ab5f67146f60eadc536c0e82c9c0472a912d50",
+    "fr/anssi/smartpgp/javacard/RefLocation.cap": "b8f9a2601b8bd60f100fcbc26ce28c6e5043f8cefd87400acb1572aa516e9974",
+    "fr/anssi/smartpgp/javacard/Descriptor.cap": "abc0932342e139b26875e53bf96fa73e357f75abed1b1b2ba8cc256cb40b6ae1"
+  },
+  "text_hash_format": "SHA-256 over UTF-8 file bytes with CRLF normalized to LF; binary/dependency hashes use raw bytes",
+  "build_tools_sha256": {
+    "tools/build_verified.py": "586d4ac751ddffebb8abae8089bcb0ff0fdc5b894f273389c9e8a36ed9199622",
+    "build.xml": "0e9faea0c72ec533de6d5ee5ac4b3468172127f2eb4a736b69dfc9109ca5617c"
+  }
+}

@@ -64,6 +64,7 @@ public final class SecureMessaging {
     private final CmacSignature macer;
     private final byte[] mac_chaining;
     private CmacKey sreceiptmac;
+    private KeyPair ephemeral;
     private CmacKey smac;
     private CmacKey srmac;
 
@@ -191,11 +192,11 @@ public final class SecureMessaging {
         }
         off += 2;
 
-        short keylen = Common.readLength(buf, off, len);
+        short keylen = Common.readLength(buf, off, (short)(len-off));
 
-        off = Common.skipLength(buf, off, len);
+        off = Common.skipLength(buf, off, (short)(len-off));
 
-        if((short)(off + keylen) > len) {
+        if(keylen != (short)(len-off)) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             return 0;
         }
@@ -205,17 +206,20 @@ public final class SecureMessaging {
             return 0;
         }
 
-        ECPrivateKey eskcard = (ECPrivateKey)KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE,
-                                                                 params.nb_bits,
-                                                                 false);
-        ECPublicKey epkcard = (ECPublicKey)KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC,
-                                                               params.nb_bits,
-                                                               false);
-
+        if(ephemeral == null || ephemeral.getPrivate().getSize() != params.nb_bits) {
+            if(ephemeral != null) { ephemeral.getPrivate().clearKey(); ephemeral.getPublic().clearKey(); }
+            ECPrivateKey sk=(ECPrivateKey)KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE,params.nb_bits,false);
+            ECPublicKey pk=(ECPublicKey)KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC,params.nb_bits,false);
+            params.setParams(sk); params.setParams(pk);
+            ephemeral=new KeyPair(pk,sk);
+            Common.requestDeletion();
+        }
+        Common.requireSpace(buf,len,(short)(2*Common.bitsToBytes(params.nb_bits)+7+4*Common.aesKeyLength(params)+32));
+        ECPrivateKey eskcard=(ECPrivateKey)ephemeral.getPrivate();
+        ECPublicKey epkcard=(ECPublicKey)ephemeral.getPublic();
+        KeyPair ekcard=ephemeral;
         params.setParams(eskcard);
         params.setParams(epkcard);
-
-        KeyPair ekcard = new KeyPair(epkcard, eskcard);
 
         ekcard.genKeyPair();
 
@@ -311,7 +315,15 @@ public final class SecureMessaging {
         clearSession(transients);
 
         if(isInitialized() && static_key.isEc()) {
-            return scp11b(ec, buf, len);
+            boolean success=false;
+            try {
+                short result=scp11b(ec,buf,len);
+                success=true;
+                return result;
+            } finally {
+                if(ephemeral!=null) { ephemeral.getPrivate().clearKey(); ephemeral.getPublic().clearKey(); }
+                if(!success) { clearSession(transients); Util.arrayFillNonAtomic(buf,(short)0,(short)buf.length,(byte)0); }
+            }
         }
 
         ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
@@ -343,6 +355,7 @@ public final class SecureMessaging {
             return 0;
         }
 
+        Common.requireSpace(transients.buffer,dataLen,Constants.AES_BLOCK_SIZE);
         incrementEncryptionCounter(transients);
 
         if(dataLen < MAC_LENGTH) {
@@ -359,9 +372,7 @@ public final class SecureMessaging {
         macer.sign(buf, (short)0, (short)(dataLen - MAC_LENGTH),
                    buf, dataLen, Constants.AES_BLOCK_SIZE);
 
-        if(Util.arrayCompare(buf, (short)(dataLen - MAC_LENGTH),
-                             buf, dataLen,
-                             MAC_LENGTH) != (byte)0) {
+        if(!Common.equal(buf, (short)(dataLen - MAC_LENGTH), buf, dataLen, MAC_LENGTH)) {
             clearSession(transients);
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             return 0;
@@ -374,6 +385,8 @@ public final class SecureMessaging {
         dataLen -= MAC_LENGTH;
 
         if(dataLen > 0) {
+            if((dataLen % Constants.AES_BLOCK_SIZE)!=0) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+            Common.requireSpace(buf,dataLen,Constants.AES_BLOCK_SIZE);
             Util.arrayFillNonAtomic(buf, dataLen, Constants.AES_BLOCK_SIZE, (byte)0);
             Util.setShort(buf, (short)(dataLen + Constants.AES_BLOCK_SIZE - 2),
                           transients.secureMessagingEncryptionCounter());
@@ -439,6 +452,8 @@ public final class SecureMessaging {
         final byte[] buf = transients.buffer;
 
         if(dataLen > 0) {
+            if((dataLen % Constants.AES_BLOCK_SIZE)!=0) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+            Common.requireSpace(buf,dataLen,Constants.AES_BLOCK_SIZE);
             Util.arrayFillNonAtomic(buf, dataLen, Constants.AES_BLOCK_SIZE, (byte)0);
             buf[dataLen] = (byte)0x80;
             Util.setShort(buf, (short)(dataLen + Constants.AES_BLOCK_SIZE - 2),

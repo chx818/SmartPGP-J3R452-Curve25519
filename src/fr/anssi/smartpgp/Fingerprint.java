@@ -32,8 +32,9 @@ public final class Fingerprint {
     }
 
     protected final void reset(final boolean isRegistering) {
+        if(isRegistering) { return; } // Newly allocated arrays are already zero.
         Common.beginTransaction(isRegistering);
-        Util.arrayFillNonAtomic(data, (short)0, Constants.FINGERPRINT_SIZE, (byte)0);
+        Common.arrayFillAtomic(data, (short)0, Constants.FINGERPRINT_SIZE, (byte)0);
         Common.commitTransaction(isRegistering);
     }
 
@@ -46,6 +47,6 @@ public final class Fingerprint {
     }
 
     protected final short write(final byte[] buf, final short off) {
-        return Util.arrayCopyNonAtomic(data, (short)0, buf, off, Constants.FINGERPRINT_SIZE);
+        return Util.arrayCopy(data, (short)0, buf, off, Constants.FINGERPRINT_SIZE);
     }
 }
