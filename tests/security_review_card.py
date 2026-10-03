@@ -98,6 +98,8 @@ class ReviewSuite(Suite):
             self.check(f'certificate_occurrence_{occurrence}',self.need(helper.apdu(0xca,0x7f,0x21))==cert)
         self.need(helper.apdu(0xca,0,0xc4));self.need(helper.apdu(0xa5,1,4,bytes.fromhex('60045c027f21'),False))
         self.check('certificate_select_after_different_DO',self.need(helper.apdu(0xca,0x7f,0x21))==bytes([0x41])*17)
+        self.need(helper.apdu(0xca,0,0xc4))
+        self.check('certificate_other_DO_resets_occurrence',self.need(helper.apdu(0xca,0x7f,0x21))==bytes([0x40])*17)
         self.attr(0xc2,'122a8648ce3d030107');self.gen(0xb8)
         for name,point in [('wrong_form',b'\x02'+bytes(64)),('off_curve',b'\x04'+bytes(64))]:
             self.pin(0x82);data,sw=self.exchange(helper.apdu(0x2a,0x80,0x86,bytes.fromhex('a6467f49438641')+point))
