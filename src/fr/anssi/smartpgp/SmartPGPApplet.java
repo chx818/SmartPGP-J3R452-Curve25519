@@ -39,6 +39,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     private final SecureMessaging sm;
 
     private final Transients transients;
+    private final RsaImportStream rsa_import;
     private final boolean require_contactless_sm;
 
     public SmartPGPApplet(final boolean strictContactless) {
@@ -48,6 +49,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         data = new Persistent();
         transients = new Transients();
         sm = new SecureMessaging(common, transients);
+        rsa_import = new RsaImportStream();
     }
 
     public static final void install(byte[] buf, short off, byte len) {
@@ -1590,11 +1592,15 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     }
 
     private final void clearConnection() {
-        data.user_pin.reset();
-        data.user_puk.reset();
-        data.admin_pin.reset();
-        transients.clear();
-        sm.clearSession(transients);
+        try {
+            rsa_import.clear(data.pgp_keys);
+        } finally {
+            data.user_pin.reset();
+            data.user_puk.reset();
+            data.admin_pin.reset();
+            transients.clear();
+            sm.clearSession(transients);
+        }
     }
 
     public final void deselect() {
@@ -1622,11 +1628,52 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             if(apdu.getCurrentState() < APDU.STATE_OUTGOING) {
                 Util.arrayFillNonAtomic(ab,(short)0,(short)ab.length,(byte)0);
             }
-            if(!transients.chainingInput() && !transients.chainingOutput()) {
+            if(!transients.chainingInput() && !transients.chainingOutput() && !rsa_import.active()) {
                 Util.arrayFillNonAtomic(transients.buffer,(short)0,(short)transients.buffer.length,(byte)0);
                 transients.setChainingInputLength((short)0);
             }
         }
+    }
+
+    private final void processPlainImport(final APDU apdu) {
+        sensitiveData();
+        assertAdmin();
+        byte[] buffer=apdu.getBuffer();
+        boolean more=(buffer[ISO7816.OFFSET_CLA] & (byte)0x10)!=0;
+        if(!rsa_import.active() && transients.chainingInput()) {
+            ISOException.throwIt(Constants.SW_CHAINING_ERROR);
+        }
+        prepareChainingInput(buffer);
+        if(!rsa_import.active()) { rsa_import.begin(); }
+        short count=apdu.setIncomingAndReceive();
+        short total=apdu.getIncomingLength();
+        short offset=apdu.getOffsetCdata();
+        short received=0;
+        if(total<=0) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+        while(count>0) {
+            if(count>(short)(total-received)) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+            rsa_import.accept(buffer,offset,count,transients.buffer,data.pgp_keys);
+            received+=count;
+            Util.arrayFillNonAtomic(buffer,offset,count,(byte)0);
+            count=apdu.receiveBytes(offset);
+        }
+        if(received!=total) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+        if(more) { return; }
+        rsa_import.requireFinalLength();
+        if(rsa_import.streamed()) {
+            short slot=rsa_import.finish(common,ec,transients.buffer,data.pgp_keys);
+            if(slot==Persistent.PGP_KEYS_OFFSET_SIG) {
+                JCSystem.beginTransaction();
+                Common.arrayFillAtomic(data.digital_signature_counter,(short)0,(short)3,(byte)0);
+                JCSystem.commitTransaction();
+            }
+        } else {
+            short size=rsa_import.bufferedLength();
+            processPutData(size,(byte)0x3f,(byte)0xff,true);
+            rsa_import.clear(data.pgp_keys);
+        }
+        transients.setChainingInput(false);
+        transients.setChainingInputLength((short)0);
     }
 
     private final void processCommand(final APDU apdu) {
@@ -1645,6 +1692,11 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             return;
         }
+
+        boolean plainImport=(cla==0 || cla==0x10) &&
+            apdubuf[ISO7816.OFFSET_INS]==Constants.INS_PUT_DATA_DB &&
+            apdubuf[ISO7816.OFFSET_P1]==(byte)0x3f && apdubuf[ISO7816.OFFSET_P2]==(byte)0xff;
+        if(rsa_import.active() && !plainImport) { ISOException.throwIt(Constants.SW_CHAINING_ERROR); }
 
         transients.setSecureMessagingOk(false);
         if((cla & 0x04)==0 && sm.isSessionAvailable() && apdubuf[ISO7816.OFFSET_INS]!=Constants.INS_GET_RESPONSE) {
@@ -1665,6 +1717,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
             return;
         }
+
+        if(plainImport) { processPlainImport(apdu); return; }
 
         final byte p1 = apdubuf[ISO7816.OFFSET_P1];
         final byte p2 = apdubuf[ISO7816.OFFSET_P2];
@@ -1838,6 +1892,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
             }
 
+            // T=0 ExtendedLength may report Ne=32767. Keep each application
+            // response within a short GET RESPONSE; remaining bytes use our chain.
+            if(resp_le > (short)256) { resp_le=(short)256; }
             if(resp_le > (short)apdubuf.length) { resp_le=(short)apdubuf.length; }
             if(resp_le > Constants.APDU_MAX_LENGTH) {
                 resp_le = Constants.APDU_MAX_LENGTH;
