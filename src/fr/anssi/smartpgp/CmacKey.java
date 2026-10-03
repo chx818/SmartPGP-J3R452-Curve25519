@@ -20,62 +20,19 @@
 
 package fr.anssi.smartpgp;
 
-import javacard.framework.JCSystem;
-import javacard.framework.Util;
 import javacard.security.AESKey;
 import javacard.security.KeyBuilder;
-import javacardx.crypto.Cipher;
 
+/** Native AES key container. No application-level CMAC subkey arrays. */
 public final class CmacKey {
-
     protected final AESKey key;
-    protected final byte[] k1;
-    protected final byte[] k2;
 
     protected CmacKey(final short aesKeyLength) {
-        key = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT,
-                                          (short)(aesKeyLength * 8),
-                                          false);
-
-        k1 = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);
-
-        k2 = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        key=(AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT,
+                                        (short)(aesKeyLength*8),false);
     }
-
-    protected final boolean isInitialized() {
-        return key.isInitialized();
-    }
-
-    protected final void clearKey() {
-        key.clearKey();
-        Util.arrayFillNonAtomic(k1, (short)0, (short)k1.length, (byte)0);
-        Util.arrayFillNonAtomic(k2, (short)0, (short)k2.length, (byte)0);
-    }
-
-    protected final short getSize() {
-        return key.getSize();
-    }
-
-    protected final void setKey(final Cipher cipher,
-                                final byte[] buf, final short bufOff) {
-        key.setKey(buf, bufOff);
-
-        cipher.init(key, Cipher.MODE_ENCRYPT);
-
-        Util.arrayFillNonAtomic(k2, (short)0, Constants.AES_BLOCK_SIZE, (byte)0);
-        cipher.doFinal(k2, (short)0, Constants.AES_BLOCK_SIZE,
-                       k1, (short)0);
-
-        final byte reduction = (byte)(0x87 & -(short)((k1[0] >>> 7) & 1));
-        Common.arrayLeftShift(k1, (short)0,
-                              k1, (short)0,
-                              Constants.AES_BLOCK_SIZE);
-        k1[(short)(Constants.AES_BLOCK_SIZE - 1)] ^= reduction;
-
-        Common.arrayLeftShift(k1, (short)0,
-                              k2, (short)0,
-                              Constants.AES_BLOCK_SIZE);
-        k2[(short)(Constants.AES_BLOCK_SIZE - 1)] ^= (byte)(0x87 & -(short)((k1[0] >>> 7) & 1));
-    }
-
+    protected final boolean isInitialized() { return key.isInitialized(); }
+    protected final void clearKey() { key.clearKey(); }
+    protected final short getSize() { return key.getSize(); }
+    protected final void setKey(final byte[] buf,final short off) { key.setKey(buf,off); }
 }

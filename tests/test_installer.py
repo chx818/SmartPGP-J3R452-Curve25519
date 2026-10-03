@@ -42,6 +42,6 @@ class InstallerTests(unittest.TestCase):
         text=BASE+f'APP: {i.INSTANCE} (SELECTABLE)\n     From: A000000002\n'
         with self.assertRaises(RuntimeError):i.installation_plan(i.parse_registry(text),ROOT,'1.1',replace=True)
     def test_current_CAP_and_sources_verified_offline(self):
-        self.assertEqual(i.verify_files(ROOT)['package_version'],'1.3')
+        self.assertEqual(i.verify_files(ROOT)['package_version'],'1.4')
 
 if __name__=='__main__':unittest.main()

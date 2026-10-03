@@ -23,166 +23,65 @@ package fr.anssi.smartpgp;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacard.security.CryptoException;
-import javacardx.crypto.Cipher;
+import javacard.security.Signature;
 
+/** Native CMAC only: do not expose K1/K2 or CBC intermediate state to Java.
+ * Lack of ALG_AES_CMAC_128 support fails session initialization, with no software
+ * downgrade. Physical protection of the native service remains platform-specific.
+ */
 public final class CmacSignature {
-
     private CmacKey key;
+    private Signature engine;
+    private final byte[] result;
+    private final byte[] short_input;
 
-    private final Cipher cipher;
-
-    private final byte[] block_prev;
-    private final byte[] block;
-
-    private final byte[] bytes;
-    private static final byte BYTE_OFFSET_BLOCK_LEN = 0;
-    private static final byte BYTES_SIZE = BYTE_OFFSET_BLOCK_LEN + 1;
-
-
-    protected CmacSignature(final Cipher cipher) {
-        key = null;
-        this.cipher = cipher;
-
-        block_prev = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);
-        block = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE, JCSystem.CLEAR_ON_DESELECT);
-
-        bytes = JCSystem.makeTransientByteArray(BYTES_SIZE, JCSystem.CLEAR_ON_DESELECT);
+    protected CmacSignature() {
+        result=JCSystem.makeTransientByteArray((short)16,JCSystem.CLEAR_ON_DESELECT);
+        short_input=JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_DESELECT);
     }
-
+    private void eraseScratch() {
+        Util.arrayFillNonAtomic(result,(short)0,(short)result.length,(byte)0);
+        Util.arrayFillNonAtomic(short_input,(short)0,(short)short_input.length,(byte)0);
+    }
     protected final void clear() {
-        initBlock();
-        if(key != null) {
-            try { key.clearKey(); }
-            finally { key = null; }
-        }
+        try { if(key!=null) { key.clearKey(); } }
+        finally { key=null; eraseScratch(); }
     }
-
-    private final byte blockLen() {
-        return bytes[BYTE_OFFSET_BLOCK_LEN];
+    protected final boolean isInitialized() { return key!=null && key.isInitialized(); }
+    protected final void init(final CmacKey next) {
+        if(next==null || !next.isInitialized()) { CryptoException.throwIt(CryptoException.UNINITIALIZED_KEY); }
+        key=next;
+        eraseScratch();
+        if(engine==null) { engine=Signature.getInstance(Signature.ALG_AES_CMAC_128,false); }
+        engine.init(key.key,Signature.MODE_SIGN);
     }
-
-    private final void setBlockLen(final byte len) {
-        bytes[BYTE_OFFSET_BLOCK_LEN] = len;
-    }
-
-
-    protected final boolean isInitialized() {
-        return (key != null)
-            && key.isInitialized();
-    }
-
-    private final void initBlock() {
-        Util.arrayFillNonAtomic(block_prev, (short)0, (short)block_prev.length, (byte)0);
-        Util.arrayFillNonAtomic(block, (short)0, (short)block.length, (byte)0);
-        Util.arrayFillNonAtomic(bytes, (short)0, (short)bytes.length, (byte)0);
-    }
-
-    protected final void init(final CmacKey keyInit) {
-        if((keyInit == null) || !keyInit.isInitialized()) {
-            CryptoException.throwIt(CryptoException.UNINITIALIZED_KEY);
-            return;
-        }
-
-        this.key = keyInit;
-
-        cipher.init(key.key, Cipher.MODE_ENCRYPT);
-
-        initBlock();
-    }
-
-    private final void commitBlock() {
-        setBlockLen((byte)0);
-
-        Common.arrayXor(block_prev, (short)0,
-                        block, (short)0,
-                        block, (short)0,
-                        Constants.AES_BLOCK_SIZE);
-
-        cipher.doFinal(block, (short)0, Constants.AES_BLOCK_SIZE,
-                       block_prev, (short)0);
-    }
-
-    protected final void update(final byte[] inBuf, short inOff, short inLen) {
+    protected final void update(final byte[] buf,final short off,final short len) {
         if(!isInitialized()) { CryptoException.throwIt(CryptoException.INVALID_INIT); }
-        if(inLen < 0) { CryptoException.throwIt(CryptoException.ILLEGAL_USE); }
-        while(inLen > 0) {
-            short bl = blockLen();
-            if(bl == Constants.AES_BLOCK_SIZE) { commitBlock(); bl = 0; }
-            short count = (short)(Constants.AES_BLOCK_SIZE - bl);
-            if(count > inLen) { count = inLen; }
-            Util.arrayCopyNonAtomic(inBuf, inOff, block, bl, count);
-            setBlockLen((byte)(bl + count));
-            inOff += count;
-            inLen -= count;
-        }
+        if(len<0) { CryptoException.throwIt(CryptoException.ILLEGAL_USE); }
+        if(len>0) { engine.update(buf,off,len); }
     }
-
-    protected final void updateByte(final byte b) {
+    protected final void updateByte(final byte value) {
+        short_input[0]=value;
+        try { update(short_input,(short)0,(short)1); }
+        finally { Util.arrayFillNonAtomic(short_input,(short)0,(short)2,(byte)0); }
+    }
+    protected final void updateShort(final short value) {
+        Util.setShort(short_input,(short)0,value);
+        try { update(short_input,(short)0,(short)2); }
+        finally { Util.arrayFillNonAtomic(short_input,(short)0,(short)2,(byte)0); }
+    }
+    protected final short sign(final byte[] buf,final short off,final short len,
+                               final byte[] out,final short outOff,final short outLen) {
         if(!isInitialized()) { CryptoException.throwIt(CryptoException.INVALID_INIT); }
-        short bl = blockLen();
-        if(bl == Constants.AES_BLOCK_SIZE) { commitBlock(); bl = 0; }
-        block[bl++] = b;
-        setBlockLen((byte)bl);
+        if(len<0 || outLen<0 || outLen>16) { CryptoException.throwIt(CryptoException.ILLEGAL_VALUE); }
+        try {
+            // Some native implementations reject null even when the message is empty.
+            short size=engine.sign(len==0 ? short_input : buf,len==0 ? (short)0 : off,len,result,(short)0);
+            if(size!=16) { CryptoException.throwIt(CryptoException.ILLEGAL_USE); }
+            Util.arrayCopyNonAtomic(result,(short)0,out,outOff,outLen);
+            // Reset accumulation explicitly before reusing this object.
+            engine.init(key.key,Signature.MODE_SIGN);
+            return outLen;
+        } finally { eraseScratch(); }
     }
-
-    protected final void updateShort(final short s) {
-        updateByte((byte)((s >> 8) & (byte)0xff));
-        updateByte((byte)(s & (byte)0xff));
-    }
-
-    private final void compute(final byte[] inBuf, short inOff, short inLen) {
-        if(!isInitialized()) {
-            CryptoException.throwIt(CryptoException.INVALID_INIT);
-            return;
-        }
-
-        if(inLen < 0) {
-            CryptoException.throwIt(CryptoException.ILLEGAL_USE);
-            return;
-        }
-
-        update(inBuf, inOff, inLen);
-        short bl = blockLen();
-
-        if(bl == Constants.AES_BLOCK_SIZE) {
-            Common.arrayXor(key.k1, (short)0,
-                            block, (short)0,
-                            block, (short)0,
-                            Constants.AES_BLOCK_SIZE);
-        } else {
-            block[bl++] = (byte)0x80;
-            Util.arrayFillNonAtomic(block, bl, (short)(Constants.AES_BLOCK_SIZE - bl), (byte)0);
-            Common.arrayXor(key.k2, (short)0,
-                            block, (short)0,
-                            block, (short)0,
-                            Constants.AES_BLOCK_SIZE);
-        }
-
-        commitBlock();
-    }
-
-    protected final short sign(final byte[] inBuf, short inOff, short inLen,
-                               final byte[] sigBuf, final short sigOff, final short sigLen) {
-
-        if(!isInitialized()) {
-            CryptoException.throwIt(CryptoException.INVALID_INIT);
-            return 0;
-        }
-
-        if((sigLen < 0) || (sigLen > Constants.AES_BLOCK_SIZE)) {
-            CryptoException.throwIt(CryptoException.ILLEGAL_VALUE);
-            return 0;
-        }
-
-        compute(inBuf, inOff, inLen);
-
-        Util.arrayCopyNonAtomic(block_prev, (short)0,
-                                sigBuf, sigOff,
-                                sigLen);
-
-        init(key);
-
-        return sigLen;
-    }
-
 }

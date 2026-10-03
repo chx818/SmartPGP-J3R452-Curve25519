@@ -79,7 +79,7 @@ public final class SecureMessaging {
         iv = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE,
                                              JCSystem.CLEAR_ON_DESELECT);
 
-        macer = new CmacSignature(cipher);
+        macer = new CmacSignature();
         mac_chaining = JCSystem.makeTransientByteArray(Constants.AES_BLOCK_SIZE,
                                                        JCSystem.CLEAR_ON_DESELECT);
         sreceiptmac = null;
@@ -151,10 +151,10 @@ public final class SecureMessaging {
             Common.requestDeletion();
         }
 
-        sreceiptmac.setKey(cipher, buf, off);
+        sreceiptmac.setKey(buf, off);
         senc.setKey(buf, (short)(off + keyLength));
-        smac.setKey(cipher, buf, (short)(off + (short)(2 * keyLength)));
-        srmac.setKey(cipher, buf, (short)(off + (short)(3 * keyLength)));
+        smac.setKey(buf, (short)(off + (short)(2 * keyLength)));
+        srmac.setKey(buf, (short)(off + (short)(3 * keyLength)));
     }
 
     protected final boolean isInitialized() {
