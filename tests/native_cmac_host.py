@@ -1,4 +1,4 @@
-﻿"""Exercise the actual native-CMAC adapter with an independent JCE-backed API double.
+"""Exercise the actual native-CMAC adapter with an independent JCE-backed API double.
 The double models functional sequencing only; actual on-card CMAC is tested separately.
 """
 import json
@@ -37,19 +37,19 @@ public boolean isInitialized(){return ready;}public void clearKey(){if(failClear
 'javacard/security/Signature.java':r'''package javacard.security;
 import java.util.*;import java.io.*;
 public class Signature {
- public static final byte ALG_AES_CMAC_128=49,MODE_SIGN=1;public static boolean supported=true;
+ public static final byte ALG_AES_CMAC_128=49,MODE_SIGN=1;public static boolean supported=true;public static short resultSize=16;public static boolean failSign=false;
  private AESKey key;private ByteArrayOutputStream input=new ByteArrayOutputStream();
  public static Signature getInstance(byte a,boolean external){if(!supported||a!=ALG_AES_CMAC_128)CryptoException.throwIt(CryptoException.NO_SUCH_ALGORITHM);return new Signature();}
  public void init(AESKey k,byte m){key=k;input.reset();}
  public void update(byte[] b,short o,short n){input.write(b,o,n);}
  static byte[] doubleBlock(byte[] b){byte[] out=new byte[16];int carry=0;for(int i=15;i>=0;i--){int v=b[i]&255;out[i]=(byte)((v<<1)|carry);carry=v>>>7;}if(carry!=0)out[15]^=(byte)0x87;return out;}
- public short sign(byte[] b,short o,short n,byte[] dst,short off){if(b==null)throw new NullPointerException();if(!key.isInitialized())CryptoException.throwIt(CryptoException.UNINITIALIZED_KEY);input.write(b,o,n);byte[] msg=input.toByteArray();try{
+ public short sign(byte[] b,short o,short n,byte[] dst,short off){if(failSign)throw new RuntimeException("simulated native sign failure");if(b==null)throw new NullPointerException();if(!key.isInitialized())CryptoException.throwIt(CryptoException.UNINITIALIZED_KEY);input.write(b,o,n);byte[] msg=input.toByteArray();try{
  javax.crypto.Cipher aes=javax.crypto.Cipher.getInstance("AES/ECB/NoPadding");aes.init(javax.crypto.Cipher.ENCRYPT_MODE,new javax.crypto.spec.SecretKeySpec(key.value,"AES"));
  byte[] k1=doubleBlock(aes.doFinal(new byte[16]));byte[] k2=doubleBlock(k1);int blocks=Math.max(1,(msg.length+15)/16);byte[] prev=new byte[16];
  for(int block=0;block<blocks;block++){byte[] piece=new byte[16];int start=block*16;int count=Math.min(16,msg.length-start);if(count>0)System.arraycopy(msg,start,piece,0,count);
  if(block==blocks-1){byte[] k=count==16?k1:k2;if(count!=16)piece[count]=(byte)128;for(int i=0;i<16;i++)piece[i]^=k[i];}
  for(int i=0;i<16;i++)piece[i]^=prev[i];prev=aes.doFinal(piece);}
- System.arraycopy(prev,0,dst,off,16);input.reset();return 16;
+ System.arraycopy(prev,0,dst,off,16);input.reset();return resultSize;
  }catch(Exception e){throw new RuntimeException(e);}}
 }
 ''',
@@ -71,6 +71,14 @@ public class Harness {
  sig.init(key);key.key.clearKey();sig.clear();ck(!sig.isInitialized());erased(sig);
  key.setKey(k,(short)0);sig.init(key);key.key.failClear=true;boolean threw=false;try{sig.clear();}catch(RuntimeException e){threw=true;}ck(threw);ck(!sig.isInitialized());erased(sig);
  }
+ CmacKey failureKey=new CmacKey((short)16);failureKey.setKey(new byte[16],(short)0);CmacSignature failureSig=new CmacSignature();
+ for(int scenario=0;scenario<2;scenario++){
+  failureSig.init(failureKey);byte[] out=new byte[16];Arrays.fill(out,(byte)0x55);byte[] unchanged=out.clone();
+  Signature.resultSize=(short)(scenario==0?15:16);Signature.failSign=scenario==1;
+  boolean rejected=false;try{failureSig.sign(null,(short)0,(short)0,out,(short)0,(short)16);}catch(RuntimeException e){rejected=true;}
+  ck(rejected);ck(Arrays.equals(out,unchanged));erased(failureSig);
+ }
+ Signature.resultSize=16;Signature.failSign=false;
  Signature.supported=false;CmacKey k=new CmacKey((short)16);k.setKey(new byte[16],(short)0);boolean failed=false;try{new CmacSignature().init(k);}catch(CryptoException e){failed=e.reason==CryptoException.NO_SUCH_ALGORITHM;}ck(failed);
  ck(CmacKey.class.getDeclaredFields().length==1);
  System.out.println("Native CMAC adapter: "+splits+" split/truncation cases; "+checks+" assertions; 128/256-bit independent references passed.");
