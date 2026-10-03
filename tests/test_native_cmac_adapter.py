@@ -1,6 +1,8 @@
-﻿"""Functional sequencing tests for the production native-CMAC adapter, not a native/SCA simulator."""
+"""Functional sequencing tests for the production native-CMAC adapter, not a native/SCA simulator."""
 import os
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import unittest
 from native_cmac_host import ROOT,java_checks
 
