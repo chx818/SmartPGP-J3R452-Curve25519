@@ -277,6 +277,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             transients.setCurrentTag(tag);
             transients.setCurrentTagOccurrence((byte)0);
         } else if(transients.currentTag() != tag) {
+            transients.setCurrentTag(tag);
             transients.setCurrentTagOccurrence((byte)0);
         }
 
@@ -305,11 +306,13 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             break;
 
         case Constants.TAG_PRIVATE_DO_0103:
+            sensitiveData();
             assertUserMode82();
             off = Util.arrayCopyNonAtomic(data.do_0103, (short)0, buf, off, data.do_0103_length);
             break;
 
         case Constants.TAG_PRIVATE_DO_0104:
+            sensitiveData();
             assertAdmin();
             off = Util.arrayCopyNonAtomic(data.do_0104, (short)0, buf, off, data.do_0104_length);
             break;
@@ -711,6 +714,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             transients.setUserPinMode81(false);
             transients.setUserPinMode82(false);
             off = data.user_pin_length;
+            Common.newPinLength(lc,off,Constants.USER_PIN_MIN_SIZE,
+                                data.keyDerivationIsActive() ? data.keyDerivationSize() : (short)0);
             if(!data.user_pin.check(transients.buffer, (short)0, off)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
@@ -748,6 +753,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 return;
             }
             off = data.admin_pin_length;
+            Common.newPinLength(lc,off,Constants.ADMIN_PIN_MIN_SIZE,
+                                data.keyDerivationIsActive() ? data.keyDerivationSize() : (short)0);
             if(!data.admin_pin.check(transients.buffer, (short)0, off)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
@@ -808,6 +815,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             transients.setUserPinMode81(false);
             transients.setUserPinMode82(false);
             off = data.user_puk_length;
+            Common.newPinLength(lc,off,Constants.USER_PIN_MIN_SIZE,
+                                data.keyDerivationIsActive() ? data.keyDerivationSize() : (short)0);
             if(!data.user_puk.check(transients.buffer, (short)0, off)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
@@ -952,9 +961,11 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             ++off;
 
+            if(off>=lc) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
             if(buf[off] == (byte)0) {
                 ++off;
             } else if(buf[off] == (byte)3) {
+                if((short)(lc-off)<4) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
                 ++off;
                 if(buf[off++] != (byte)0x84) {
                     ISOException.throwIt(ISO7816.SW_WRONG_DATA);
@@ -987,6 +998,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 transients.setCurrentTag(tag);
                 transients.setCurrentTagOccurrence((byte)0);
             } else if(transients.currentTag() != tag) {
+                transients.setCurrentTag(tag);
                 transients.setCurrentTagOccurrence((byte)0);
             }
 

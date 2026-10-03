@@ -50,13 +50,19 @@ The target JCOP configuration exposes **Java Card 3.0.5** and vendor-specific 25
 
 ---
 
-### RSA private-key import (package 1.2)
+### RSA private-key import (since package 1.2)
 
 RSA-3072/4096 format-3 imports now stream one component at a time into a key that remains unavailable until all seven components and pairwise checks succeed. This reuses the 1280-byte work buffer and adds 16 bytes of transient parsing state; other applets do not need to be removed for this implementation.
 
 Use the existing plaintext OpenPGP PUT DATA command/chaining on a contact interface, or on NFC with compatibility profile `00`. Large imports wrapped in SCP11b are **not** supported by this streaming path; the protected-command buffer limit is unchanged. This is not an invitation to bypass the strict NFC profile. Existing Ed25519/X25519 and RSA-2048 imports keep their complete-buffer validation path.
 
 Malformed metadata is rejected before replacing the old key. Once a valid import starts writing key components, an error, interruption or reset makes the target slot unavailable; it does not restore the old private key. Re-import is the recovery path. Independent on-card tests cover import/readback/sign/decrypt/auth, malformed input, truncation, pair mismatch, reselection and reset at an APDU boundary. They do not establish arbitrary power-cut/fault-injection resistance.
+
+### Package 1.3 review follow-up
+
+The whole applet and build/install path were re-reviewed, including unchanged code. The follow-up fixes bound old-credential/new-PIN lengths before calling OwnerPIN; scan exactly one final AES block for ISO padding without plaintext-dependent loop termination; validate imported/ECDH public point form; recover incomplete SM key allocation; and correct certificate selection and cleanup. The padding check still returns valid/invalid and a decoded length; this is not a claim of physical constant time.
+
+`tests/test_review_primitives.py` executes the actual Java padding/PIN helpers against reference results. `tests/security_review_card.py` exercises PIN/PUK boundaries, authorization, certificate selection, ECDH rejection, SM rekeying, all padding lengths and malformed authenticated padding/MACs. This suite changes PINs and provisions SM test keys, so use a disposable instance and reinstall afterwards. It does not replace power/EM/fault measurements or verify the closed native implementation.
 
 ### 🛡️ 3. Cryptographic Security & Hardening Highlights
 
@@ -220,13 +226,19 @@ This project is licensed under the **GNU General Public License v2 (GPL-2.0)** -
 
 ---
 
-### RSA 私钥导入（包版本 1.2）
+### RSA 私钥导入（自包版本 1.2）
 
 RSA-3072/4096 的格式3导入现在逐个分量写入密钥对象，全部七个分量及成对检查成功后才允许使用。复用原1280字节工作缓冲，只增加16字节瞬态解析状态，不要求为此删除其他应用。
 
 适用于接触接口的普通 OpenPGP PUT DATA/命令链，以及兼容profile `00`下的NFC。**封装在SCP11b中的大RSA导入不走这条流式路径**，受保护命令仍有原缓冲上限；不得因此绕开严格NFC策略。Ed25519/X25519与RSA-2048仍使用完整缓冲后的原解析验证路径。
 
 错误模板在替换旧钥前拒绝；开始写入有效导入的分量之后，异常、中断或复位会令目标槽不可用，不承诺恢复旧私钥，重新导入即可恢复。独立实卡测试包含导入/公钥读回/签名/解密/认证、恶意输入、截断、公私钥不匹配、重选及APDU边界上的受控复位；不等于任意时点断电或物理故障注入评估。
+
+### 包版本 1.3 全量复审后修复
+
+重新审查了整个app及构建/安装路径，包含未修改代码。新增修复：在OwnerPIN验证之前检查“旧凭据＋新PIN”完整长度；对ISO填充固定扫描最后一个AES块，避免按解密内容提前结束；检查导入/ECDH公钥格式；恢复SM会话密钥部分分配失败；修正证书选择状态及清理。填充验证仍返回合法/非法及内容长度，不将此称为物理恒时证明。
+
+`tests/test_review_primitives.py`直接执行Java填充/PIN辅助函数，与参考结果对照。`tests/security_review_card.py`覆盖PIN/PUK边界、权限、证书选择、非法ECDH、SM重建、全部填充长度及携带有效MAC的非法填充。该套件会改测试PIN并配置SM测试钥，仅用于可重装实例，结束后需清洁重装；不能替代功耗/EM/故障测量或证明不透明原生实现安全。
 
 ### 🛡️ 3. 密码学安全与深度加固
 

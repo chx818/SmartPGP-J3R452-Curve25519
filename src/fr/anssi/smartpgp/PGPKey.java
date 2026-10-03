@@ -125,10 +125,12 @@ public final class PGPKey {
         }
 
         if(certificate_length > 0) {
-            Util.arrayFillNonAtomic(certificate, (short)0, (short)certificate.length, (byte)0);
+            // Hide metadata before non-atomic erasure; a tear cannot expose a partially cleared certificate.
             certificate_length = (short)0;
+            Util.arrayFillNonAtomic(certificate, (short)0, (short)certificate.length, (byte)0);
         }
 
+        Util.arrayFillNonAtomic(certificate_staging,(short)0,(short)certificate_staging.length,(byte)0);
         if(!is_secure_messaging_key) {
             fingerprint.reset(isRegistering);
             Util.arrayFillNonAtomic(generation_date, (short)0, Constants.GENERATION_DATE_SIZE, (byte)0);
@@ -567,6 +569,7 @@ public final class PGPKey {
                 if(((byte)(tag_len[i] - 1) & (byte)0x1) != 0) {
                     return null;
                 }
+                if(buf[off]!=(byte)0x04) { return null; }
                 pub.setW(buf, off, tag_len[i]);
                 break;
 
@@ -988,6 +991,8 @@ public final class PGPKey {
             final PrivateKey priv = keys.getPrivate();
             final Signature sig = common.getEcdsaSignature(lc);
 
+            short componentWidth=Common.bitsToBytes(ecParams(ec).nb_bits);
+            Common.requireSpace(buf,lc,(short)(4*componentWidth+12));
             sig.init(priv, Signature.MODE_SIGN);
 
             final short sig_size = sig.signPreComputedHash(buf, (short)0, lc,
@@ -1009,7 +1014,10 @@ public final class PGPKey {
                 if((short)(rawOff-off)<2 || buf[off++]!=2) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
                 short size=(short)(buf[off++] & 0xff);
                 if(size<=0 || size>(short)(rawOff-off) || buf[off]<0) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
-                if(size>1 && buf[off]==0) { ++off; --size; }
+                if(size>1 && buf[off]==0) {
+                    if(buf[(short)(off+1)]>=0) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                    ++off; --size;
+                }
                 if(size>width) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
                 short dst=(short)(rawOff+component*width);
                 Util.arrayFillNonAtomic(buf,dst,width,(byte)0);
@@ -1100,7 +1108,7 @@ public final class PGPKey {
                 return 0;
             }
 
-            if(Util.getShort(buf, off) != (short)0x7f49) {
+            if((short)(lc-off)<2 || Util.getShort(buf, off) != (short)0x7f49) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return 0;
             }
@@ -1113,7 +1121,7 @@ public final class PGPKey {
                 return 0;
             }
 
-            if(buf[off] != (byte)0x86) {
+            if(off>=lc || buf[off] != (byte)0x86) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return 0;
             }
@@ -1210,7 +1218,7 @@ public final class PGPKey {
                 return 0;
             }
 
-            if(Util.getShort(buf, off) != (short)0x7f49) {
+            if((short)(lc-off)<2 || Util.getShort(buf, off) != (short)0x7f49) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return 0;
             }
@@ -1223,7 +1231,7 @@ public final class PGPKey {
                 return 0;
             }
 
-            if(buf[off] != (byte)0x86) {
+            if(off>=lc || buf[off] != (byte)0x86) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return 0;
             }
@@ -1236,6 +1244,8 @@ public final class PGPKey {
                 return 0;
             }
 
+            if(buf[off]!=(byte)0x04) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            Common.requireSpace(buf,lc,Common.bitsToBytes(params.nb_bits));
             final KeyAgreement ka = common.getKaEcDh();
             ka.init(priv);
 

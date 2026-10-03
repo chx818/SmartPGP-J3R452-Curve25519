@@ -132,8 +132,15 @@ public final class SecureMessaging {
 
     private final void initSession(final short keyLength,
                                    final byte[] buf, final short off) {
-        if((sreceiptmac == null) ||
-           (sreceiptmac.getSize() != (short)(keyLength * 8))) {
+        if((sreceiptmac == null) || (senc == null) || (smac == null) || (srmac == null) ||
+           (sreceiptmac.getSize() != (short)(keyLength * 8)) ||
+           (senc.getSize() != (short)(keyLength * 8)) ||
+           (smac.getSize() != (short)(keyLength * 8)) ||
+           (srmac.getSize() != (short)(keyLength * 8))) {
+            if(senc!=null) { senc.clearKey(); }
+            if(sreceiptmac!=null) { sreceiptmac.clearKey(); }
+            if(smac!=null) { smac.clearKey(); }
+            if(srmac!=null) { srmac.clearKey(); }
             senc = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT,
                                                (short)(keyLength * 8),
                                                false);
@@ -141,6 +148,7 @@ public final class SecureMessaging {
             sreceiptmac = new CmacKey(keyLength);
             smac = new CmacKey(keyLength);
             srmac = new CmacKey(keyLength);
+            Common.requestDeletion();
         }
 
         sreceiptmac.setKey(cipher, buf, off);
@@ -205,6 +213,8 @@ public final class SecureMessaging {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             return 0;
         }
+
+        if(buf[off]!=(byte)0x04) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
 
         if(ephemeral == null || ephemeral.getPrivate().getSize() != params.nb_bits) {
             if(ephemeral != null) { ephemeral.getPrivate().clearKey(); ephemeral.getPublic().clearKey(); }
@@ -423,15 +433,7 @@ public final class SecureMessaging {
 
             Util.arrayFillNonAtomic(iv, (short)0, (short)iv.length, (byte)0);
 
-            --dataLen;
-            while((dataLen > 0) && buf[dataLen] == (byte)0)
-                --dataLen;
-
-            if((dataLen <= 0) || (buf[dataLen] != (byte)0x80)) {
-                clearSession(transients);
-                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-                return 0;
-            }
+            dataLen=Common.unpad80(buf,dataLen);
 
         }
 

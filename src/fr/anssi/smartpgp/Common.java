@@ -239,6 +239,40 @@ public final class Common {
         }
     }
 
+    /** Remove ISO 7816-4 padding from exactly one final block. Fixed byte
+     * access/loop count for equal public ciphertext lengths; not an SCA proof. */
+    protected static short unpad80(final byte[] buf, final short len) {
+        if(len < Constants.AES_BLOCK_SIZE || (len % Constants.AES_BLOCK_SIZE)!=0 || len>buf.length) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+        short searching=1;
+        short invalid=0;
+        short result=0;
+        for(short i=1;i<=Constants.AES_BLOCK_SIZE;++i) {
+            short value=(short)(buf[(short)(len-i)] & 0xff);
+            short zero=(short)(((value-1) >> 8) & 1);
+            short marker=(short)((((value ^ 0x80)-1) >> 8) & 1);
+            short choose=(short)(searching & marker);
+            invalid |= (short)(searching & (1 ^ zero) & (1 ^ marker));
+            short mask=(short)-choose;
+            result=(short)((result & ~mask) | ((len-i) & mask));
+            searching &= (short)(1 ^ marker);
+        }
+        if((invalid | searching)!=0) { ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED); }
+        return result;
+    }
+
+    /** Bound the whole old-credential/new-PIN command before checking OwnerPIN. */
+    protected static short newPinLength(final short lc, final short oldLength,
+                                        final short minimum, final short derivedLength) {
+        short size=(short)(lc-oldLength);
+        if(oldLength<0 || oldLength>127 || lc<oldLength || size>127 ||
+           (derivedLength==0 ? size<minimum : size!=derivedLength)) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+        return size;
+    }
+
     protected static final short bitsToBytes(final short bits) {
         return (short)((bits / 8) + (short)(((bits % 8) == 0) ? 0 : 1));
     }
