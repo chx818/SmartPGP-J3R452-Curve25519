@@ -98,20 +98,20 @@ public final class SecureMessaging {
 
 
     protected final void clearSession(final Transients transients) {
-        if((senc != null) && senc.isInitialized()) {
+        if(senc != null) {
             senc.clearKey();
         }
         Util.arrayFillNonAtomic(iv, (short)0, (short)iv.length, (byte)0);
 
         macer.clear();
         Util.arrayFillNonAtomic(mac_chaining, (short)0, (short)mac_chaining.length, (byte)0);
-        if((sreceiptmac != null) && sreceiptmac.isInitialized()) {
+        if(sreceiptmac != null) {
             sreceiptmac.clearKey();
         }
-        if((smac != null) && smac.isInitialized()) {
+        if(smac != null) {
             smac.clearKey();
         }
-        if((srmac != null) && srmac.isInitialized()) {
+        if(srmac != null) {
             srmac.clearKey();
         }
 
