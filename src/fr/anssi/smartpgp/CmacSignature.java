@@ -52,10 +52,8 @@ public final class CmacSignature {
     protected final void clear() {
         initBlock();
         if(key != null) {
-            if(key.isInitialized()) {
-                key.clearKey();
-            }
-            key = null;
+            try { key.clearKey(); }
+            finally { key = null; }
         }
     }
 

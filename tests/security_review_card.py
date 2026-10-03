@@ -1,4 +1,4 @@
-﻿"""Destructive full-review regressions: PIN/PUK changes and SCP11b malformed input.
+"""Destructive full-review regressions: PIN/PUK changes and SCP11b malformed input.
 Only an explicitly selected test instance. The suite restores PINs on normal paths,
 but reinstall after tests: it provisions a static SM key and writes test metadata.
 """
@@ -129,6 +129,19 @@ class ReviewSuite(Suite):
         session=SmSession(self);session.need(0x20,0,0x83,b'12345678')
         self.check('SM_recovers_after_errors',len(session.need(0xca,0,0xc4))==7)
 
+    def lifecycle(self):
+        self.select();session=SmSession(self);session.need(0x20,0,0x83,b'12345678')
+        session.need(0xe6,0,0);self.check('terminate_with_authenticated_SM',True)
+        data,sw=self.exchange(helper.apdu(0xa4,4,0,bytes.fromhex('d27600012401')))
+        self.check('terminated_SELECT_6285',sw==0x6285)
+        data,sw=self.exchange(helper.apdu(0x47,0x81,0,b'\xb6\x00'))
+        self.check('terminated_key_read_denied',sw==0x6d00 and not data)
+        self.need(bytes.fromhex('00440001'));self.select();self.check('activate_full_reset',True)
+        self.check('reset_clears_key_slots',self.need(helper.apdu(0xca,0,0xde))==bytes.fromhex('de06010002000300'))
+        self.check('reset_signature_count_zero',self.need(helper.apdu(0xca,0,0x7a))==bytes.fromhex('9303000000'))
+        self.check('reset_default_PW_budgets',self.need(helper.apdu(0xca,0,0xc4))[4:]==bytes([3,0,3]))
+        self.pin();self.check('reset_default_admin_and_media_policy',True);self.select()
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--reader',required=True);p.add_argument('--expect-aid',required=True);p.add_argument('--allow-key-replacement',action='store_true');p.add_argument('--baseline-pin-only',action='store_true');p.add_argument('--report',type=Path,required=True);a=p.parse_args()
     if not a.allow_key_replacement:p.error('destructive test flag required')
@@ -137,7 +150,9 @@ def main():
         s.select()
         if s.need(helper.apdu(0xca,0,0x4f)).hex().upper()!=a.expect_aid.upper():raise RuntimeError('Wrong card AID')
         observations=s.pin_bounds(a.baseline_pin_only)
-        if not a.baseline_pin_only:s.protocol_and_crypto()
+        if not a.baseline_pin_only:
+            s.protocol_and_crypto()
+            s.lifecycle()
         done=True
     finally:
         card.close();a.report.parent.mkdir(parents=True,exist_ok=True)

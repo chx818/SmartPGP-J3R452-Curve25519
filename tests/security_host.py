@@ -140,6 +140,9 @@ public class AuditHarness {
  try { java.lang.reflect.Field f=CmacSignature.class.getDeclaredField("block");f.setAccessible(true);
  System.out.println("cmac_clear_block_is_zero="+Arrays.equals((byte[])f.get(sig),new byte[16]));
  }catch(Exception e){throw new RuntimeException(e);}
+ key.setKey(cipher,hex("2b7e151628aed2a6abf7158809cf4f3c"),(short)0);
+ sig.init(key);key.key.clearKey();sig.clear();
+ System.out.println("cmac_clear_uninitialized_subkeys_is_zero="+(Arrays.equals(key.k1,new byte[16])&&Arrays.equals(key.k2,new byte[16])));
  }
 }
 """
