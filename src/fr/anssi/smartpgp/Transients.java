@@ -39,7 +39,8 @@ public final class Transients {
     private static final byte BYTE_OFFSET_CHAINING_INPUT_P1 = BYTE_OFFSET_CHAINING_INPUT_INS + 1;
     private static final byte BYTE_OFFSET_CHAINING_INPUT_P2 = BYTE_OFFSET_CHAINING_INPUT_P1 + 1;
     private static final byte BYTE_OFFSET_CURRENT_TAG_OCCURRENCE = BYTE_OFFSET_CHAINING_INPUT_P2 + 1;
-    private static final byte BYTES_SIZE = BYTE_OFFSET_CURRENT_TAG_OCCURRENCE + 1;
+    private static final byte BYTE_OFFSET_CHAIN_CLA = BYTE_OFFSET_CURRENT_TAG_OCCURRENCE + 1;
+    private static final byte BYTES_SIZE = BYTE_OFFSET_CHAIN_CLA + 1;
 
     private final boolean[] booleans;
     private static final byte BOOLEAN_OFFSET_CHAINING_OUTPUT = 0;
@@ -62,6 +63,7 @@ public final class Transients {
     }
 
     protected final void clear() {
+        javacard.framework.Util.arrayFillNonAtomic(buffer, (short)0, (short)buffer.length, (byte)0);
         for(byte i = 0; i < shorts.length; ++i) {
             shorts[i] = (short)0;
         }
@@ -72,6 +74,9 @@ public final class Transients {
             booleans[i] = false;
         }
     }
+
+    protected final void setChainCla(final byte cla) { bytes[BYTE_OFFSET_CHAIN_CLA] = cla; }
+    protected final byte chainCla() { return bytes[BYTE_OFFSET_CHAIN_CLA]; }
 
     protected final void setCurrentTag(final short tag) {
         shorts[SHORT_OFFSET_CURRENT_TAG] = tag;

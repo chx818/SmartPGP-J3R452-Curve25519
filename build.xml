@@ -1,23 +1,9 @@
-<?xml version="1.0"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project name="SmartPGP-J3R452-Curve25519" default="convert" basedir=".">
-  <description>Ant build for SmartPGP with NXP J3R452 hardware Curve25519 support</description>
-
-  <property name="jckit" location="sdks/jc310r20210706_kit"/>
-
-  <taskdef name="javacard" classname="pro.javacard.ant.JavaCard" classpath="lib/ant-javacard.jar"/>
-
-  <target name="clean">
-    <delete dir="build"/>
-    <delete dir="dist"/>
-  </target>
-
+  <description>Compile, convert and independently verify before publishing CAP files.</description>
   <target name="convert">
-    <mkdir dir="dist"/>
-    <javacard jckit="${jckit}">
-      <cap export="build" output="dist/SmartPGPApplet.cap" sources="src" aid="d27600012401" version="1.0" targetsdk="sdks/jc305u3_kit" verify="false">
-        <applet class="fr.anssi.smartpgp.SmartPGPApplet" aid="d276000124010304AFAF000000000000"/>
-        <import jar="lib/curve25519.jar"/>
-      </cap>
-    </javacard>
+    <exec executable="python" dir="${basedir}" failonerror="true">
+      <arg value="tools/build_verified.py"/>
+    </exec>
   </target>
 </project>

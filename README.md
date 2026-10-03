@@ -4,7 +4,7 @@
 [![JavaCard](https://img.shields.io/badge/JavaCard-3.0.5-orange.svg)]()
 [![Hardware](https://img.shields.io/badge/NXP-J3R452%20%2F%20JCOP%204.5-red.svg)]()
 [![Hardware Crypto](https://img.shields.io/badge/Hardware%20Crypto-Ed25519%20%2F%20X25519-green.svg)]()
-[![Tests](https://img.shields.io/badge/Physical%20Card%20Verification-11%2F11%20PASSED-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Physical%20Card%20Verification-12%2F12%20PASSED-brightgreen.svg)]()
 
 [English](#english) | [中文说明](#中文说明)
 
@@ -50,26 +50,39 @@ The NXP J3R452 is an affordable, widely available smart card with a high-securit
 
 ---
 
-### 🛡️ 3. Cryptographic Security & Side-Channel Audit
+### 🛡️ 3. Cryptographic Security & Hardening Highlights
 
 1. **Zero Secret-Dependent Side Channels (Constant-Time Execution)**:
    - Scalar multiplication and EdDSA signing execute directly inside NXP's CC EAL6+ certified hardware engine.
    - All `if-else` branches in the code operate exclusively on **public metadata** (such as algorithm selection or input length validation). Zero branching depends on secret key bits, plaintexts, or intermediate state.
-2. **Immediate Memory Zeroization**:
-   - Private key buffers imported via APDU are scrubbed (`Util.arrayFillNonAtomic`) immediately upon being loaded into secure key containers.
-   - During `PSO: DECIPHER` (X25519), ephemeral public key objects are wiped in a `finally` block (`clearKey()`), and scratch buffers are overwritten with zeros.
-   - Upon applet deselect, `clearConnection()` purges transient buffers and session keys.
-3. **Lazy-Loaded Engines & Zero-Duplicate Cipher Architecture**:
-   - To coexist smoothly on cards loaded with multiple intensive applets (PIV, FIDO2, Satochip, Seedkeeper, VivoKey OTP), SmartPGP shares a single AES-CBC engine across applet commands, Secure Messaging, and CMAC verification.
-   - Heavy cryptographic engines (RSA PKCS#1 ciphers, Weierstrass EC Diffie-Hellman, SHA-variant ECDSA signers, and Curve25519 hardware engines) are lazy-loaded on-demand via cached singletons. Static crypto engine instances at installation drop from 15 to 2, almost doubling free JCOP System RAM (Tag 03) and conserving COR RAM.
-4. **Dual Format Compatibility**:
+   - Constant-time CMAC implementation with branchless subkey reduction and final-block handling.
+2. **RFC 7748 §6 Zero Shared Secret & Small-Subgroup Detection**:
+   - Strictly enforces constant-time zero shared secret detection on X25519 ECDH calculations.
+   - If the shared secret is all zeros or maps to a small-subgroup root, transient buffers are immediately scrubbed and the operation is rejected, preventing small-subgroup attacks.
+3. **Atomic Key Lifecycle & Tear Protection (Sentinel Pattern)**:
+   - Curve25519 key slots use persistent valid status flags and bitwise inverse validation.
+   - Key generation and import flows are guarded by an EEPROM sentinel flag pattern, ensuring that unexpected power loss or card tearing during generation cannot leave half-written keys in a usable state.
+4. **RFC 7748 / RFC 8032 Scalar Clamping vs. Seed Preservation**:
+   - Imported X25519 private keys undergo strict RFC 7748 §5 scalar clamping at the application layer.
+   - Ed25519 private keys are preserved as raw 32-byte seeds per RFC 8032, allowing the underlying hardware engine to perform SHA-512 expansion and clamping internally, avoiding corrupted derivation chains.
+5. **Runtime Signature Validation & Pre-Output Self-Verification**:
+   - Enforces runtime assertions on Ed25519 signatures returned from the hardware coprocessor to guarantee exact 64-byte outputs (RFC 8032 §5.1.6).
+   - Signatures (RSA, Ed25519, ECDSA) undergo on-chip verification prior to returning the APDU, mitigating physical and fault-injection risks that could leak private key fragments from erroneous signatures.
+   - ECDSA signatures return fixed-width raw `r || s` (64 bytes for P-256, 96 bytes for P-384, 132 bytes for P-521).
+6. **Immediate Sensitive Memory Zeroization**:
+   - Transient RAM buffers are proactively cleared across PIN/PUK verification (`INS_VERIFY`, `INS_CHANGE_REFERENCE_DATA`, `INS_RESET_RETRY_COUNTER`), `PUT DATA` operations, and key deletion (`clearKey()`).
+   - Upon applet deselect or connection reset, all transient session buffers and session keys are destroyed.
+7. **Lazy-Loaded Engines & Zero-Duplicate Cipher Architecture**:
+   - Shares a single AES engine across core applet routines, Secure Messaging (SCP11b), and CMAC verification.
+   - Heavy cryptographic engines (RSA PKCS#1 ciphers, Weierstrass EC Diffie-Hellman, SHA-variant ECDSA signers, and Curve25519 hardware engines) are lazy-loaded on-demand via cached singletons. Static crypto engine instances at installation drop from 15 to 2, conserving critical JCOP System RAM (Tag 03) and eliminating COR RAM allocation conflicts.
+8. **Dual Public Key Format Compatibility**:
    - Accepts both standard 32-byte raw points and 33-byte points prefixed with `0x40` (RFC 4880bis / RFC 9580).
 
 ---
 
 ### 🧪 4. Physical Card Verification Results
 
-Tested on a physical NXP J3R452 card via PC/SC (`tests/test_curve25519.py`):
+Tested on a physical NXP J3R452 card via PC/SC (`tests/security_card.py`):
 
 ```text
 ============================================================
@@ -88,17 +101,18 @@ Tested on a physical NXP J3R452 card via PC/SC (`tests/test_curve25519.py`):
 [9] PSO: COMPUTE DIGITAL SIGNATURE (Ed25519 64-byte)........ [SW: 9000]
 [10] VERIFY User PIN Mode 82 for Decipher (123456).......... [SW: 9000]
 [11] PSO: DECIPHER (Hardware X25519 ECDH 32-byte)........... [SW: 9000]
+[12] Cryptographic Hardening & Low-Order Point Defense...... [SW: 9000]
 ============================================================
-  ALL 11 HARDWARE SECURITY TESTS PASSED 100% ON J3R452!
+  ALL 12 HARDWARE SECURITY TESTS PASSED 100% ON J3R452!
 ============================================================
 ```
 
 **Multi-Algorithm Physical Card Verification**:
-- `tests/test_curve25519.py`: Ed25519 & X25519 KeyGen, EdDSA sign, ECDH decipher -> **11/11 PASSED**
+- `tests/security_card.py`: Ed25519 & X25519 KeyGen, EdDSA sign, ECDH decipher, low-order point defenses -> **12/12 PASSED**
 - `tests/test_nistp256.py`: NIST P-256 (ansix9p256r1) On-Card KeyGen & ECDSA SHA-256 signing (66-byte DER) -> **PASSED [SW: 9000]**
 - `tests/test_rsa.py`: RSA 2048 CRT On-Card KeyGen & PKCS#1 v1.5 signing (256-byte) -> **PASSED [SW: 9000]**
 
-And verified via system `gpg --card-status`:
+Verified via system `gpg --card-status`:
 ```text
 Application ID ...: D276000124010304AFAF000000000000
 Version ..........: 3.4
@@ -113,6 +127,7 @@ Signature counter : 1
 > [!IMPORTANT]
 > You **MUST** load `Curve25519.cap` first before installing `SmartPGPApplet.cap`. The card installer will reject the applet if the driver package (`FF00025519`) is missing.
 
+#### Manual Command-Line Installation:
 ```cmd
 :: 1. Load the Curve25519 hardware driver CAP (AID: FF00025519)
 gp -r PCD --load lib\Curve25519.cap
@@ -124,16 +139,22 @@ gp -r PCD --install dist\SmartPGPApplet.cap
 gp -r PCD -l
 ```
 
-Or run `install.bat` / `./install.ps1` for automated deployment with JVM entropy pre-warming (preventing Windows SCardSvr 5s timeouts).
+#### One-Click Installation:
+Run `install.bat` (or `./install.ps1` in PowerShell) for automated deployment with JVM entropy pre-warming (preventing Windows SCardSvr 5s timeouts).
 
 ---
 
 ### ⚙️ 6. Building from Source
 
-**Prerequisites**: JDK 11 and Apache Ant 1.10+.
+**Prerequisites**: JDK 11 and Python 3 (or Apache Ant 1.10+).
+
 ```cmd
 build.bat
 ```
+*(PowerShell users can execute `./build.ps1`)*.
+
+The build script compiles JavaCard bytecode against Oracle Java Card SDK 3.0.5/3.1.0, executes the Oracle Converter, and performs bytecode verification.
+
 Output binary: `dist/SmartPGPApplet.cap`
 
 ---
@@ -153,6 +174,7 @@ gpg/card> admin
 gpg/card> key-attr
 # Choose (2) ECC -> (1) Curve 25519 for Signature, Encryption, Authentication
 gpg/card> generate
+# Enter your PINs when prompted to generate native on-card keypairs
 ```
 
 ---
@@ -210,26 +232,36 @@ NXP J3R452 是目前市场上应用最广泛、性价比最高且通过 CC EAL6+
 
 ---
 
-### 🛡️ 3. 密码学安全与侧信道审计要点
+### 🛡️ 3. 密码学安全与深度加固
 
-1. **恒定时间执行（防时序与功耗分析）**：
+1. **恒定时间执行（防时序与功耗侧信道）**：
    - 标量乘法与 EdDSA 签名运算完全交由 NXP 芯片内部通过 CC EAL6+ 认证的硬件密码协处理器执行。
    - Java 代码中的所有 `if-else` 分支**严格属于公开元数据与指令路由**（例如算法选择或长度校验），绝对不存在任何依赖私钥内容、明文或中间状态的数据分支。
-2. **敏感内存即时清零（Zeroization）**：
-   - APDU 导入的私钥在存入持久安全容器后，其内存缓冲区立即通过 `Util.arrayFillNonAtomic` 清零。
-   - `PSO: DECIPHER` 计算完成后，在 `finally` 块中立即调用 `clearKey()` 硬件擦除临时公钥，暂存计算区全部刷零。
+   - AES-128/256 CMAC 移位与子密钥约减消除 Java 层秘密相关分支，严密处理空尾块与跨包分段。
+2. **RFC 7748 §6 全零共享秘密与低阶点防御**：
+   - 对 X25519 ECDH 输出实施恒定时间全零检测，一旦协商结果全零或遭遇异常低阶点输入，立即擦除临时缓冲并拒绝返回，杜绝子群限制攻击。
+3. **原子生命周期与掉电防撕裂保护 (Sentinel Flag)**：
+   - 密钥槽使用持久有效状态及其反码标记。在密钥生成/导入过程中引入 EEPROM 状态哨兵，原生初始化与成对自检全部成功后才提交有效状态，掉电中断不会导致半成品密钥暴露为有效密钥。
+4. **RFC 7748 与 RFC 8032 标量处理规范**：
+   - X25519 私钥在导入时执行 RFC 7748 §5 标准标量钳位（Clamping）。
+   - Ed25519 私钥严格保留为 32 字节原始 seed（RFC 8032），由底层硬件协处理器在 SHA-512 展开阶段内部完成标量推导与钳位，防止双重钳位破坏推导链。
+5. **运行时签名校验与输出前自检验签**：
+   - 对底层硬件协处理器返回的 Ed25519 签名执行严格的 64 字节长度断言（RFC 8032 §5.1.6）。
+   - RSA、Ed25519、ECDSA 签名在发送 APDU 响应前均在片内执行验签自检，降低因瞬态故障或故障注入导致错误签名泄漏私钥的风险。ECDSA 签名输出固定宽度的裸 `r || s` 格式。
+6. **敏感内存即时清零 (Zeroization)**：
+   - 在 PIN/PUK 验证（`INS_VERIFY`、`INS_CHANGE_REFERENCE_DATA`、`INS_RESET_RETRY_COUNTER`）、`PUT DATA` 敏感属性写入以及密钥重置（`clearKey()`）路径中，主动清零 RAM 暂存缓冲与敏感持久槽位。
    - 卡片在断开或反选（Deselect）时，自动触发 `clearConnection()` 销毁所有会话密钥与 RAM 临时数据。
-3. **密码引擎按需懒加载与零冗余复用架构**：
-   - 为确保在多应用共存环境（如单卡同时部署 PIV、FIDO2、Satochip、Seedkeeper 与 VivoKey Apex OTP）下极限节约 JCOP 内存，SmartPGP 将单一 AES-CBC 引擎在应用主指令、安全信道（SM）及 CMAC 验签之间高度复用。
+7. **密码引擎按需懒加载与零冗余复用架构**：
+   - 为确保在多应用共存环境（如单卡同时部署 PIV、FIDO2、Satochip、Seedkeeper 与 VivoKey Apex OTP）下极限节约 JCOP 内存，SmartPGP 将单一 AES 引擎在应用主指令、安全信道（SM）及 CMAC 验签之间高度复用。
    - 占资源的复杂硬件密码引擎（RSA PKCS#1 密码机、标准 EC 椭圆曲线 Diffie-Hellman、SHA 散列族 ECDSA 签名器以及 Curve25519 引擎）均采用按需懒加载的静态单例模式。安装期静态密码对象由 15 个锐减至 2 个，使 JCOP 系统堆 RAM（Tag 03）可用空间翻倍，彻底消除 COR RAM 挤占冲突。
-4. **双公钥格式原生兼容**：
+8. **双公钥格式原生兼容**：
    - 兼容原生 32 字节裸点及 RFC 4880bis / RFC 9580 规定的带 `0x40` 前缀的 33 字节公钥格式。
 
 ---
 
-### 🧪 4. 物理卡片实机 11 项全链路自动化测试报告
+### 🧪 4. 物理卡片实机自动化测试报告
 
-通过 PC/SC 在真实的 NXP J3R452 智能卡上运行 `tests/test_curve25519.py` 自动化测试套件：
+通过 PC/SC 在真实的 NXP J3R452 智能卡上运行 `tests/security_card.py` 自动化测试套件：
 
 ```text
 ============================================================
@@ -248,13 +280,14 @@ NXP J3R452 是目前市场上应用最广泛、性价比最高且通过 CC EAL6+
 [9] 执行 PSO: 硬件原生 Ed25519 签名 (64字节)................. [SW: 9000]
 [10] 验证用户 PIN 模式 82 解密权限 (123456)................... [SW: 9000]
 [11] 执行 PSO: 硬件原生 X25519 ECDH 密钥协商 (32字节)........ [SW: 9000]
+[12] 执行密码学加固与低阶点边界防御测试...................... [SW: 9000]
 ============================================================
-  11 项硬件密码学安全测试全部 100% 通过！
+  12 项硬件密码学安全测试全部 100% 通过！
 ============================================================
 ```
 
 **多算法物理实机全覆盖验证**：
-- `tests/test_curve25519.py`：Ed25519 / X25519 密钥生成、EdDSA 签名、ECDH 硬件解密 -> **11 项全部通过**
+- `tests/security_card.py`：Ed25519 / X25519 密钥生成、EdDSA 签名、ECDH 硬件解密、零点/低阶点防护 -> **12 项全部通过**
 - `tests/test_nistp256.py`：NIST P-256（ansix9p256r1）卡内密钥生成与 ECDSA SHA-256 签名（66 字节 DER） -> **实机通过 [SW: 9000]**
 - `tests/test_rsa.py`：RSA 2048 CRT 卡内密钥生成与 PKCS#1 v1.5 填充签名（256 字节） -> **实机通过 [SW: 9000]**
 
@@ -289,16 +322,20 @@ gp -r PCD -l
 ```cmd
 install.bat
 ```
+*(PowerShell 用户可执行 `./install.ps1`)*
 
 ---
 
 ### ⚙️ 6. 源码构建说明
 
-**前置依赖**：JDK 11 与 Apache Ant 1.10+。
+**前置依赖**：JDK 11 与 Python 3（或 Apache Ant 1.10+）。
+
 ```cmd
 build.bat
 ```
-*(PowerShell 用户可执行 `./build.ps1`)*。构建产物输出于：`dist/SmartPGPApplet.cap`。
+*(PowerShell 用户可执行 `./build.ps1`)*。
+
+构建脚本会自动调用 Java Card SDK 3.0.5/3.1.0 进行字节码编译、Oracle Converter 转换以及离线 Verifier 完整性校验。构建产物输出于：`dist/SmartPGPApplet.cap`。
 
 ---
 
@@ -322,10 +359,9 @@ gpg/card> generate
 
 ---
 
-## 📄 开源许可证与致谢 (License & Credits)
+### 📄 8. 开源许可证与致谢 (License & Credits)
 
 本项目遵循 **GNU General Public License v2 (GPL-2.0)** 开源许可证协议 - 详见 [LICENSE](LICENSE) 文件。
 
-### 致谢 (Acknowledgments)：
 - **[github-af/SmartPGP](https://github.com/github-af/SmartPGP)** & **[ANSSI-FR/SmartPGP](https://github.com/ANSSI-FR/SmartPGP)**: 原始 Java Card OpenPGP v3.4 规范实现 © ANSSI 及 SmartPGP 开源贡献者。
 - **[suut/Curve25519-JavaCard](https://github.com/suut/Curve25519-JavaCard)**: NXP J3R452 底层硬件 Curve25519 协处理器驱动库 © suut。

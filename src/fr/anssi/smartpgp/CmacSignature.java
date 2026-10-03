@@ -50,6 +50,7 @@ public final class CmacSignature {
     }
 
     protected final void clear() {
+        initBlock();
         if(key != null) {
             if(key.isInitialized()) {
                 key.clearKey();
@@ -104,59 +105,26 @@ public final class CmacSignature {
     }
 
     protected final void update(final byte[] inBuf, short inOff, short inLen) {
-
-        if(!isInitialized()) {
-            CryptoException.throwIt(CryptoException.INVALID_INIT);
-            return;
+        if(!isInitialized()) { CryptoException.throwIt(CryptoException.INVALID_INIT); }
+        if(inLen < 0) { CryptoException.throwIt(CryptoException.ILLEGAL_USE); }
+        while(inLen > 0) {
+            short bl = blockLen();
+            if(bl == Constants.AES_BLOCK_SIZE) { commitBlock(); bl = 0; }
+            short count = (short)(Constants.AES_BLOCK_SIZE - bl);
+            if(count > inLen) { count = inLen; }
+            Util.arrayCopyNonAtomic(inBuf, inOff, block, bl, count);
+            setBlockLen((byte)(bl + count));
+            inOff += count;
+            inLen -= count;
         }
-
-        if(inLen <= 0) {
-            return;
-        }
-
-        short bl = blockLen();
-
-        short remLen = (short)(Constants.AES_BLOCK_SIZE - bl);
-
-        while(inLen >= remLen) {
-            Util.arrayCopyNonAtomic(inBuf, inOff,
-                                    block, bl,
-                                    remLen);
-            commitBlock();
-
-            inLen -= remLen;
-            inOff += remLen;
-
-            remLen = Constants.AES_BLOCK_SIZE;
-            bl = (short)0;
-        }
-
-        if(inLen > 0) {
-            Util.arrayCopyNonAtomic(inBuf, inOff,
-                                    block, bl,
-                                    inLen);
-
-            bl = (short)(bl + inLen);
-        }
-
-        setBlockLen((byte)bl);
     }
 
     protected final void updateByte(final byte b) {
-        if(!isInitialized()) {
-            CryptoException.throwIt(CryptoException.INVALID_INIT);
-            return;
-        }
-
+        if(!isInitialized()) { CryptoException.throwIt(CryptoException.INVALID_INIT); }
         short bl = blockLen();
-
+        if(bl == Constants.AES_BLOCK_SIZE) { commitBlock(); bl = 0; }
         block[bl++] = b;
-
-        if(bl == Constants.AES_BLOCK_SIZE) {
-            commitBlock();
-        } else {
-            setBlockLen((byte)bl);
-        }
+        setBlockLen((byte)bl);
     }
 
     protected final void updateShort(final short s) {
@@ -175,19 +143,8 @@ public final class CmacSignature {
             return;
         }
 
+        update(inBuf, inOff, inLen);
         short bl = blockLen();
-
-        if(inLen > 0) {
-            final short il = (short)(inLen - 1);
-
-            update(inBuf, inOff, il);
-
-            bl = blockLen();
-
-            block[bl++] = inBuf[(short)(inOff + il)];
-
-            setBlockLen((byte)bl);
-        }
 
         if(bl == Constants.AES_BLOCK_SIZE) {
             Common.arrayXor(key.k1, (short)0,

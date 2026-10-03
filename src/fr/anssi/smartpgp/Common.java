@@ -25,6 +25,7 @@ import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacard.security.KeyAgreement;
+import javacard.security.CryptoException;
 import javacard.security.MessageDigest;
 import javacard.security.RandomData;
 import javacard.security.Signature;
@@ -60,7 +61,8 @@ public final class Common {
         RandomData rnd = null;
         try {
             rnd = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
-        } catch (Exception e) {
+        } catch (CryptoException e) {
+            if(e.getReason() != CryptoException.NO_SUCH_ALGORITHM) { throw e; }
             rnd = RandomData.getInstance(RandomData.ALG_TRNG);
         }
         random = rnd;
@@ -174,7 +176,7 @@ public final class Common {
     }
 
     protected static final short skipLength(final byte[] buf, final short off, final short len) {
-        if(len < 1) {
+        if((off < 0) || (len < 1) || (off > (short)(buf.length - len))) {
             ISOException.throwIt(ISO7816.SW_WRONG_DATA);
             return off;
         }
@@ -205,7 +207,7 @@ public final class Common {
     }
 
     protected static final short readLength(final byte[] buf, final short off, final short len) {
-        if(len < 1) {
+        if((off < 0) || (len < 1) || (off > (short)(buf.length - len))) {
             ISOException.throwIt(ISO7816.SW_WRONG_DATA);
             return (short)0;
         }
@@ -227,7 +229,9 @@ public final class Common {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return (short)0;
             }
-            return Util.getShort(buf, (short)(off + 1));
+            final short value = Util.getShort(buf, (short)(off + 1));
+            if(value < 0) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            return value;
 
         default:
             ISOException.throwIt(ISO7816.SW_WRONG_DATA);
@@ -245,9 +249,7 @@ public final class Common {
         if(len > 0) {
             outBuf[outOff++] = (byte)(inBuf[inOff++] << 1);
             for(short i = 1; i < len; ++i) {
-                if((inBuf[inOff] & (byte)0x80) != (byte)0) {
-                    outBuf[(short)(outOff - 1)] |= (byte)0x01;
-                }
+                outBuf[(short)(outOff - 1)] |= (byte)((inBuf[inOff] >>> 7) & 1);
                 outBuf[outOff++] = (byte)(inBuf[inOff++] << 1);
             }
         }
@@ -305,6 +307,30 @@ public final class Common {
         }
 
         return off;
+    }
+
+    /* Compare without a Java-level early exit. This is not a physical SCA claim. */
+    protected static final boolean equal(final byte[] a, final short ao,
+                                         final byte[] b, final short bo, final short len) {
+        byte diff = 0;
+        for(short i = 0; i < len; ++i) { diff |= (byte)(a[(short)(ao+i)] ^ b[(short)(bo+i)]); }
+        return diff == 0;
+    }
+
+    protected static final void requireSpace(final byte[] b, final short off, final short len) {
+        if(off < 0 || len < 0 || off > (short)(b.length-len)) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+    }
+
+    /* Caller holds a transaction for persistent data; ordinary element writes
+       participate in it. Also works during installation without a transaction. */
+    protected static final short arrayFillAtomic(final byte[] b, final short off,
+                                                 final short len, final byte value) {
+        requireSpace(b,off,len);
+        short end=(short)(off+len);
+        for(short i=off;i<end;++i) { b[i]=value; }
+        return end;
     }
 
     protected static final void requestDeletion() {

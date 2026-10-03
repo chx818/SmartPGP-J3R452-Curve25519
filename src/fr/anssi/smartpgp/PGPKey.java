@@ -48,7 +48,8 @@ public final class PGPKey {
 
     protected final byte[] generation_date;
 
-    protected final byte[] certificate;
+    protected byte[] certificate;
+    private byte[] certificate_staging;
     protected short certificate_length;
 
     protected final byte[] attributes;
@@ -69,24 +70,11 @@ public final class PGPKey {
     private final short[] data_tag_len;
 
     /* CRIT-03: Persistent sentinel flag for fault-tolerant tear protection during keygen/import */
-    private boolean key_operation_in_progress;
-
-    /* MED-04: Pre-allocated transient buffer for securely zeroizing key slots before clearing */
-    private final byte[] zero_key_buf;
-
-    /* CRIT-01: RFC 7748 §6 / Errata 4730 small-subgroup order-8 point coordinates (little-endian) */
-    private static final byte[] LOW_ORDER_ROOT1 = {
-        (byte)0xEC, (byte)0xED, (byte)0x78, (byte)0xD6, (byte)0x79, (byte)0x56, (byte)0x22, (byte)0x7F,
-        (byte)0x7C, (byte)0xE0, (byte)0x17, (byte)0xDE, (byte)0x63, (byte)0xFD, (byte)0x56, (byte)0xAD,
-        (byte)0x57, (byte)0xAF, (byte)0x9E, (byte)0x9D, (byte)0xE3, (byte)0x6A, (byte)0x28, (byte)0x15,
-        (byte)0x32, (byte)0x49, (byte)0x1F, (byte)0xEE, (byte)0x5F, (byte)0x56, (byte)0xB0, (byte)0x47
-    };
-    private static final byte[] LOW_ORDER_ROOT2 = {
-        (byte)0x00, (byte)0x12, (byte)0x87, (byte)0x29, (byte)0x86, (byte)0x98, (byte)0xDD, (byte)0x80,
-        (byte)0x83, (byte)0x1F, (byte)0xE8, (byte)0x21, (byte)0x9C, (byte)0x02, (byte)0xA9, (byte)0x52,
-        (byte)0xA8, (byte)0x50, (byte)0x61, (byte)0x62, (byte)0x1C, (byte)0x95, (byte)0xE7, (byte)0xCA,
-        (byte)0xCD, (byte)0xB6, (byte)0xE0, (byte)0x11, (byte)0xA0, (byte)0xA9, (byte)0x4F, (byte)0x38
-    };
+    private byte key_state;
+    private byte key_state_inverse;
+    private static final byte KEY_EMPTY = (byte)0x33;
+    private static final byte KEY_UPDATING = (byte)0x5A;
+    private static final byte KEY_VALID = (byte)0x66;
 
     protected PGPKey(final boolean for_secure_messaging) {
 
@@ -101,6 +89,7 @@ public final class PGPKey {
         }
 
         certificate = new byte[Constants.cardholderCertificateMaxLength()];
+        certificate_staging = new byte[Constants.cardholderCertificateMaxLength()];
         certificate_length = 0;
 
         attributes = new byte[Constants.ALGORITHM_ATTRIBUTES_MAX_LENGTH];
@@ -108,13 +97,12 @@ public final class PGPKey {
 
         data_tag_val = JCSystem.makeTransientByteArray((short)7, JCSystem.CLEAR_ON_DESELECT);
         data_tag_len = JCSystem.makeTransientShortArray((short)7, JCSystem.CLEAR_ON_DESELECT);
-        zero_key_buf = JCSystem.makeTransientByteArray((short)32, JCSystem.CLEAR_ON_DESELECT);
 
         reset(true);
     }
 
     private final void resetKeys(final boolean isRegistering) {
-        key_operation_in_progress = false;
+        setKeyState(KEY_UPDATING, isRegistering);
 
         if(keys != null) {
             keys.getPrivate().clearKey();
@@ -123,17 +111,11 @@ public final class PGPKey {
         }
 
         if(c25519_priv != null) {
-            try {
-                c25519_priv.setS(zero_key_buf, (short)0, (short)32);
-            } catch (Exception e) {}
             c25519_priv.clearKey();
             c25519_priv = null;
         }
 
         if(c25519_pub != null) {
-            try {
-                c25519_pub.setW(zero_key_buf, (short)0, (short)32);
-            } catch (Exception e) {}
             c25519_pub.clearKey();
             c25519_pub = null;
         }
@@ -153,24 +135,31 @@ public final class PGPKey {
         }
 
         has_been_generated = false;
+        setKeyState(KEY_EMPTY, isRegistering);
     }
 
     protected final void reset(final boolean isRegistering) {
         resetKeys(isRegistering);
 
-        Common.beginTransaction(isRegistering);
+        if(isRegistering) {
+            byte[] defaults=is_secure_messaging_key ? Constants.ALGORITHM_ATTRIBUTES_DEFAULT_SECURE_MESSAGING : Constants.ALGORITHM_ATTRIBUTES_DEFAULT;
+            Util.arrayCopyNonAtomic(defaults,(short)0,attributes,(short)0,(short)defaults.length);
+            attributes_length=(byte)defaults.length;
+            return;
+        }
+        Common.beginTransaction(false);
         if(attributes_length > 0) {
-            Util.arrayFillNonAtomic(attributes, (short)0, attributes_length, (byte)0);
+            Common.arrayFillAtomic(attributes, (short)0, attributes_length, (byte)0);
             attributes_length = (byte)0;
         }
 
         if(is_secure_messaging_key) {
-            Util.arrayCopyNonAtomic(Constants.ALGORITHM_ATTRIBUTES_DEFAULT_SECURE_MESSAGING, (short)0,
+            Util.arrayCopy(Constants.ALGORITHM_ATTRIBUTES_DEFAULT_SECURE_MESSAGING, (short)0,
                                     attributes, (short)0,
                                     (short)Constants.ALGORITHM_ATTRIBUTES_DEFAULT_SECURE_MESSAGING.length);
             attributes_length = (byte)Constants.ALGORITHM_ATTRIBUTES_DEFAULT_SECURE_MESSAGING.length;
         } else {
-            Util.arrayCopyNonAtomic(Constants.ALGORITHM_ATTRIBUTES_DEFAULT, (short)0,
+            Util.arrayCopy(Constants.ALGORITHM_ATTRIBUTES_DEFAULT, (short)0,
                                     attributes, (short)0,
                                     (short)Constants.ALGORITHM_ATTRIBUTES_DEFAULT.length);
             attributes_length = (byte)Constants.ALGORITHM_ATTRIBUTES_DEFAULT.length;
@@ -178,17 +167,23 @@ public final class PGPKey {
         Common.commitTransaction(isRegistering);
     }
 
+    private final void setKeyState(final byte state, final boolean registering) {
+        Common.beginTransaction(registering);
+        key_state = state;
+        key_state_inverse = (byte)~state;
+        Common.commitTransaction(registering);
+    }
+
     protected final boolean isInitialized() {
-        if(key_operation_in_progress) {
-            resetKeys(false);
-            key_operation_in_progress = false;
-            return false;
-        }
-        if((c25519_priv != null) || (c25519_pub != null)) {
-            return (c25519_priv != null) && (c25519_pub != null) &&
+        return key_state == KEY_VALID && key_state_inverse == (byte)~KEY_VALID && keyObjectsInitialized();
+    }
+
+    private final boolean keyObjectsInitialized() {
+        if(c25519_priv != null || c25519_pub != null) {
+            return c25519_priv != null && c25519_pub != null &&
                    c25519_priv.isInitialized() && c25519_pub.isInitialized();
         }
-        return (keys != null) && keys.getPrivate().isInitialized() && keys.getPublic().isInitialized();
+        return keys != null && keys.getPrivate().isInitialized() && keys.getPublic().isInitialized();
     }
 
     protected final byte keyInformation() {
@@ -210,13 +205,16 @@ public final class PGPKey {
             return;
         }
 
+        // Stage outside the transaction; only references and length are committed.
+        Util.arrayFillNonAtomic(certificate_staging,(short)0,(short)certificate_staging.length,(byte)0);
+        Util.arrayCopyNonAtomic(buf,off,certificate_staging,(short)0,len);
         JCSystem.beginTransaction();
-        if(certificate_length > 0) {
-            Util.arrayFillNonAtomic(certificate, (short)0, certificate_length, (byte)0);
-        }
-        Util.arrayCopyNonAtomic(buf, off, certificate, (short)0, len);
-        certificate_length = len;
+        byte[] old=certificate;
+        certificate=certificate_staging;
+        certificate_staging=old;
+        certificate_length=len;
         JCSystem.commitTransaction();
+        Util.arrayFillNonAtomic(certificate_staging,(short)0,(short)certificate_staging.length,(byte)0);
     }
 
     protected final void setGenerationDate(final byte[] buf, final short off, final short len) {
@@ -241,9 +239,11 @@ public final class PGPKey {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return;
             }
-            if((Util.getShort(buf, (short)(off + 1)) < 2048) ||
+            if(((Util.getShort(buf, (short)(off + 1)) != 2048) &&
+                (Util.getShort(buf, (short)(off + 1)) != 3072) &&
+                (Util.getShort(buf, (short)(off + 1)) != 4096)) ||
                (Util.getShort(buf, (short)(off + 3)) != 0x11) ||
-               (buf[(short)(off + 5)] < 0) || (buf[(short)(off + 5)] > 3)) {
+               (buf[(short)(off + 5)] != 3)) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
                 return;
             }
@@ -301,9 +301,9 @@ public final class PGPKey {
 
         JCSystem.beginTransaction();
         if(attributes_length > 0) {
-            Util.arrayFillNonAtomic(attributes, (short)0, attributes_length, (byte)0);
+            Common.arrayFillAtomic(attributes, (short)0, attributes_length, (byte)0);
         }
-        Util.arrayCopyNonAtomic(buf, off, attributes, (short)0, len);
+        Util.arrayCopy(buf, off, attributes, (short)0, len);
         if((buf[off] == 0x12 || buf[off] == 0x13 || buf[off] == 0x16) && (attributes[(short)(len - 1)] != (byte)0xff)) {
             if(len >= Constants.ALGORITHM_ATTRIBUTES_MAX_LENGTH) {
                 JCSystem.abortTransaction();
@@ -409,49 +409,28 @@ public final class PGPKey {
         return true;
     }
 
-    protected final void generate(final ECCurves ec) {
-        key_operation_in_progress = true;
+    protected final void generate(final Common common, final ECCurves ec, final byte[] scratch) {
         resetKeys(false);
-
-        if(isRsa()) {
-            keys = generateRSA();
-        } else if(isCurve25519(ec)) {
-            final ECParams params = ecParams(ec);
-            if(!generateCurve25519(params)) {
-                key_operation_in_progress = false;
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-                return;
-            }
-        } else if(isEc()) {
-            keys = generateEC(ec);
-        }
-
-        if(!isCurve25519(ec)) {
-            if((keys == null) || (keys.getPrivate() == null) || (keys.getPublic() == null)) {
-                resetKeys(false);
-                key_operation_in_progress = false;
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-                return;
-            }
-            try {
+        setKeyState(KEY_UPDATING,false);
+        boolean success=false;
+        try {
+            if(isRsa()) { keys=generateRSA(); }
+            else if(isCurve25519(ec)) {
+                if(!generateCurve25519(ecParams(ec))) { ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); }
+            } else { keys=generateEC(ec); }
+            if(!isCurve25519(ec)) {
+                if(keys==null) { ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); }
                 keys.genKeyPair();
-            } catch (CryptoException e) {
-                resetKeys(false);
-                key_operation_in_progress = false;
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-                return;
             }
+            if(!keyObjectsInitialized()) { ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); }
+            validatePair(common,ec,scratch);
+            has_been_generated=true;
+            setKeyState(KEY_VALID,false);
+            success=true;
+        } finally {
+            Util.arrayFillNonAtomic(scratch,(short)0,(short)scratch.length,(byte)0);
+            if(!success) { resetKeys(false); }
         }
-
-        if(!isInitialized()) {
-            resetKeys(false);
-            key_operation_in_progress = false;
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-            return;
-        }
-
-        has_been_generated = true;
-        key_operation_in_progress = false;
     }
 
     private final KeyPair importRSAKey(final byte[] buf,
@@ -468,6 +447,7 @@ public final class PGPKey {
             return null;
         }
 
+        keys = new KeyPair(pub, priv);
         short off = boff;
         byte i = 0;
         while(i < tag_count) {
@@ -562,6 +542,7 @@ public final class PGPKey {
         params.setParams(priv);
         params.setParams(pub);
 
+        keys = new KeyPair(pub, priv);
         short off = boff;
         byte i = 0;
         while(i < tag_count) {
@@ -606,17 +587,10 @@ public final class PGPKey {
 
     private final void cleanCurve25519Keys() {
         if(c25519_priv != null) {
-            try {
-                /* MED-04: Overwrite private key slot in EEPROM before clearKey() */
-                c25519_priv.setS(zero_key_buf, (short)0, (short)32);
-            } catch (Exception e) {}
             c25519_priv.clearKey();
             c25519_priv = null;
         }
         if(c25519_pub != null) {
-            try {
-                c25519_pub.setW(zero_key_buf, (short)0, (short)32);
-            } catch (Exception e) {}
             c25519_pub.clearKey();
             c25519_pub = null;
         }
@@ -657,17 +631,12 @@ public final class PGPKey {
                         cleanCurve25519Keys();
                         return false;
                     }
-                    /* Cryptographic Architecture (RFC 7748 §5 vs RFC 8032):
-                     * - Ed25519: The private key is a 32-byte seed. Clamping must NOT be applied here,
-                     *   as RFC 8032 requires clamping to occur internally on the expanded 64-byte scalar
-                     *   derived from SHA-512(seed). Clamping the seed here would corrupt the derivation chain.
-                     * - X25519: The private key is a direct scalar multiplier. RFC 7748 §5 strictly requires
-                     *   scalar clamping (bits 0,1,2 cleared, bit 255 cleared, bit 254 set) to mitigate
-                     *   small-subgroup and timing attacks. */
+                    /* Ed25519 is a seed, never clamp it. Legacy OpenPGP cv25519
+                       imports the scalar as a big-endian integer; JCOPX setS uses
+                       the same integer order (unlike its public wire encoding). */
                     if(!params.isEd25519) {
-                        buf[off] &= (byte)0xF8;
-                        buf[(short)(off + 31)] &= (byte)0x7F;
-                        buf[(short)(off + 31)] |= (byte)0x40;
+                        buf[(short)(off+31)] &= (byte)0xf8;
+                        buf[off] = (byte)((buf[off] & 0x7f) | 0x40);
                     }
                     c25519_priv.setS(buf, off, (short)32);
                     break;
@@ -683,6 +652,7 @@ public final class PGPKey {
                         cleanCurve25519Keys();
                         return false;
                     }
+                    if(!params.isEd25519) { normalizeX25519(buf,pubOff); }
                     c25519_pub.setW(buf, pubOff, (short)32);
                     break;
 
@@ -707,108 +677,114 @@ public final class PGPKey {
         return true;
     }
 
-    protected final void importKey(final ECCurves ec,
+    protected final void importKey(final Common common, final ECCurves ec,
                                    final byte[] buf, final short boff, final short len) {
+        Common.requireSpace(buf, boff, len);
         short off = boff;
-
-        short template_len = 0;
-        short template_off = 0;
-
-        short data_len = 0;
-        short data_off = 0;
-
-        byte data_tag_count = 0;
-
-        while((short)(len - (short)(off - boff)) > 2) {
-            switch(Util.getShort(buf, off)) {
-
-            case (short)0x7f48:
-                off += 2;
-                template_len = Common.readLength(buf, off, (short)(len - (short)(off - boff)));
-                off = Common.skipLength(buf, off, (short)(len - (short)(off - boff)));
-                template_off = off;
-
-                if(template_len > (short)(len - (short)(off - boff))) {
-                    ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                    return;
-                }
-
-                while((short)(template_len - (short)(off - template_off)) > 1) {
-                    if((buf[off] < (byte)0x91) ||
-                       (buf[off] > (byte)0x99)) {
-                        ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                        return;
-                    }
-
-                    if(data_tag_count >= data_tag_val.length) {
-                        ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                        return;
-                    }
-
-                    data_tag_val[data_tag_count] = buf[off];
-                    ++off;
-
-                    data_tag_len[data_tag_count] = Common.readLength(buf, off, (short)(template_len - (short)(off - template_off)));
-                    off = Common.skipLength(buf, off, (short)(template_len - (short)(off - template_off)));
-
-                    ++data_tag_count;
-                }
-                break;
-
-            case (short)0x5f48:
-                off += 2;
-                data_len = Common.readLength(buf, off, (short)(len - (short)(off - boff)));
-                off = Common.skipLength(buf, off, (short)(len - (short)(off - boff)));
-                data_off = off;
-
-                if(data_len > (short)(len - (short)(off - boff))) {
-                    ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                    return;
-                }
-
-                off += data_len;
-
-                break;
-
-            default:
+        short end = (short)(boff + len);
+        byte count = 0;
+        boolean updating = false;
+        try {
+            if((short)(end-off) < 3 || Util.getShort(buf,off) != (short)0x7f48) {
                 ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return;
             }
-        }
-
-        key_operation_in_progress = true;
-        resetKeys(false);
-
-        boolean success = false;
-        if(isRsa()) {
-            keys = importRSAKey(buf, data_off, data_len, data_tag_count, data_tag_val, data_tag_len);
-            success = (keys != null);
-        } else if(isCurve25519(ec)) {
-            success = importCurve25519Key(ecParams(ec), buf, data_off, data_len, data_tag_count, data_tag_val, data_tag_len);
-        } else if(isEc()) {
-            keys = importECKey(ec, buf, data_off, data_len, data_tag_count, data_tag_val, data_tag_len);
-            success = (keys != null);
-        }
-
-        /* Cryptographic Audit: Zeroize private key material in input buffer immediately */
-        if(data_len > 0) {
-            Util.arrayFillNonAtomic(buf, data_off, data_len, (byte)0);
-        }
-
-        /* Zeroize tag parsing buffers */
-        Util.arrayFillNonAtomic(data_tag_val, (short)0, (short)data_tag_val.length, (byte)0);
-        for(byte t = 0; t < (byte)data_tag_len.length; ++t) {
-            data_tag_len[t] = (short)0;
-        }
-
-        if(!success || !isInitialized()) {
+            off += 2;
+            short templateLen = Common.readLength(buf,off,(short)(end-off));
+            off = Common.skipLength(buf,off,(short)(end-off));
+            if(templateLen <= 0 || templateLen > (short)(end-off)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            short templateEnd = (short)(off+templateLen);
+            short total = 0;
+            while(off < templateEnd) {
+                if(count >= data_tag_val.length || (short)(templateEnd-off) < 2) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                byte tag = buf[off++];
+                if((tag & 0xff) < 0x91 || (tag & 0xff) > 0x99) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                for(byte i=0;i<count;++i) { if(data_tag_val[i] == tag) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); } }
+                short size = Common.readLength(buf,off,(short)(templateEnd-off));
+                off = Common.skipLength(buf,off,(short)(templateEnd-off));
+                if(size <= 0 || size > (short)(len-total)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                total += size;
+                data_tag_val[count] = tag;
+                data_tag_len[count++] = size;
+            }
+            if((short)(end-off)<3 || Util.getShort(buf,off)!=(short)0x5f48) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            off += 2;
+            short dataLen = Common.readLength(buf,off,(short)(end-off));
+            off = Common.skipLength(buf,off,(short)(end-off));
+            if(dataLen != total || dataLen != (short)(end-off)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            if(isRsa()) {
+                if(count != 7) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                for(byte i=0;i<7;++i) {
+                    if(data_tag_val[i] != (byte)(0x91+i)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                    short expected = i==0 ? Common.bitsToBytes(rsaExponentBitSize()) :
+                        (i==6 ? Common.bitsToBytes(rsaModulusBitSize()) : (short)(Common.bitsToBytes(rsaModulusBitSize())/2));
+                    if(data_tag_len[i]!=expected) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                }
+            } else {
+                if(count!=2 || data_tag_val[0]!=(byte)0x92 || data_tag_val[1]!=(byte)0x99) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                ECParams params=ecParams(ec);
+                short width=Common.bitsToBytes(params.nb_bits);
+                if(data_tag_len[0] <= 0 || data_tag_len[0]>width ||
+                   (params.isCurve25519 && data_tag_len[0]!=32) ||
+                   (params.isCurve25519 ? (data_tag_len[1]!=32 && data_tag_len[1]!=33) : data_tag_len[1]!=(short)(1+2*width))) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+                }
+            }
             resetKeys(false);
-            key_operation_in_progress = false;
-            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-            return;
+            setKeyState(KEY_UPDATING,false);
+            updating = true;
+            boolean ok;
+            if(isRsa()) { ok=importRSAKey(buf,off,dataLen,count,data_tag_val,data_tag_len)!=null; }
+            else if(isCurve25519(ec)) { ok=importCurve25519Key(ecParams(ec),buf,off,dataLen,count,data_tag_val,data_tag_len); }
+            else { ok=importECKey(ec,buf,off,dataLen,count,data_tag_val,data_tag_len)!=null; }
+            if(!ok || !keyObjectsInitialized()) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            Util.arrayFillNonAtomic(buf,(short)0,(short)buf.length,(byte)0);
+            validatePair(common,ec,buf);
+            has_been_generated=false;
+            setKeyState(KEY_VALID,false);
+            updating=false;
+        } finally {
+            Util.arrayFillNonAtomic(buf,(short)0,(short)buf.length,(byte)0);
+            Util.arrayFillNonAtomic(data_tag_val,(short)0,(short)data_tag_val.length,(byte)0);
+            for(byte i=0;i<data_tag_len.length;++i) { data_tag_len[i]=0; }
+            if(updating) { resetKeys(false); }
         }
+    }
 
-        key_operation_in_progress = false;
+    /* Pairwise test before activation. Uses only public outputs and transient scratch. */
+    private final void validatePair(final Common common, final ECCurves ec, final byte[] buf) {
+        boolean ok = false;
+        try {
+            common.random.generateData(buf,(short)0,(short)32);
+            if(isCurve25519(ec)) {
+                if(ecParams(ec).isEd25519) {
+                    short n=common.getCurve25519Sig().sign(c25519_priv,buf,(short)0,(short)32,buf,(short)32);
+                    ok=n==64 && common.getCurve25519Sig().verify(c25519_pub,buf,(short)0,(short)32,buf,(short)32,n);
+                } else {
+                    Curve25519PublicKey eph=common.getCurve25519EphPub();
+                    try {
+                        Util.arrayFillNonAtomic(buf,(short)0,(short)32,(byte)0); buf[0]=9;
+                        eph.setW(buf,(short)0,(short)32);
+                        short n=common.getCurve25519Ka().keyExchange(c25519_priv,eph,buf,(short)32);
+                        short m=c25519_pub.getW(buf,(short)64);
+                        ok=n==32 && m==32 && Common.equal(buf,(short)32,buf,(short)64,(short)32);
+                    } finally { eph.clearKey(); }
+                }
+            } else if(isRsa()) {
+                Cipher c=common.getCipherRsaPkcs1();
+                c.init(keys.getPrivate(),Cipher.MODE_ENCRYPT);
+                short n=c.doFinal(buf,(short)0,(short)32,buf,(short)32);
+                c.init(keys.getPublic(),Cipher.MODE_DECRYPT);
+                short m=c.doFinal(buf,(short)32,n,buf,(short)(32+n));
+                ok=m==32 && Common.equal(buf,(short)0,buf,(short)(32+n),(short)32);
+            } else {
+                Signature sig=common.getEcdsaSignature((short)32);
+                sig.init(keys.getPrivate(),Signature.MODE_SIGN);
+                short n=sig.signPreComputedHash(buf,(short)0,(short)32,buf,(short)32);
+                sig.init(keys.getPublic(),Signature.MODE_VERIFY);
+                ok=sig.verifyPreComputedHash(buf,(short)0,(short)32,buf,(short)32,n);
+            }
+            if(!ok) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+        } finally { Util.arrayFillNonAtomic(buf,(short)0,(short)buf.length,(byte)0); }
     }
 
     protected final short writePublicKeyDo(final byte[] buf, short off) {
@@ -915,12 +891,18 @@ public final class PGPKey {
             final Cipher cipher = common.getCipherRsaPkcs1();
             cipher.init(priv, Cipher.MODE_ENCRYPT);
 
+            Common.requireSpace(buf,lc,(short)(Common.bitsToBytes(rsaModulusBitSize())+lc));
             off = cipher.doFinal(buf, (short)0, lc,
                                  buf, lc);
 
-            return Util.arrayCopyNonAtomic(buf, lc,
-                                           buf, (short)0,
-                                           off);
+            short sigLen = off;
+            Common.requireSpace(buf,(short)(lc+sigLen),lc);
+            cipher.init(keys.getPublic(),Cipher.MODE_DECRYPT);
+            short recovered=cipher.doFinal(buf,lc,sigLen,buf,(short)(lc+sigLen));
+            if(recovered!=lc || !Common.equal(buf,(short)0,buf,(short)(lc+sigLen),lc)) { ISOException.throwIt(ISO7816.SW_UNKNOWN); }
+            Util.arrayCopyNonAtomic(buf,lc,buf,(short)0,sigLen);
+            Util.arrayFillNonAtomic(buf,sigLen,(short)(buf.length-sigLen),(byte)0);
+            return sigLen;
 
         } else if(isCurve25519(ec)) {
             final ECParams params = ecParams(ec);
@@ -939,13 +921,13 @@ public final class PGPKey {
             try {
                 sig_size = common.getCurve25519Sig().sign(c25519_priv, buf, (short)0, lc, buf, lc);
             } catch (CryptoException e) {
-                Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
+                Util.arrayFillNonAtomic(buf, (short)0, (short)buf.length, (byte)0);
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 return 0;
             }
 
-            /* RFC 8032 §5.1.6: An Ed25519 signature is strictly 64 bytes (R || S) */
-            if(sig_size != 64) {
+            /* RFC 8032 搂5.1.6: An Ed25519 signature is strictly 64 bytes (R || S) */
+            if(sig_size != 64 || !common.getCurve25519Sig().verify(c25519_pub,buf,(short)0,lc,buf,lc,sig_size)) {
                 Util.arrayFillNonAtomic(buf, (short)0, (short)buf.length, (byte)0);
                 ISOException.throwIt(ISO7816.SW_UNKNOWN);
                 return 0;
@@ -967,67 +949,51 @@ public final class PGPKey {
             final short sig_size = sig.signPreComputedHash(buf, (short)0, lc,
                                                            buf, lc);
 
-            off = (short)(lc + 1);
-            if((buf[off] & (byte)0x80) != (byte)0) {
-                ++off;
+            sig.init(keys.getPublic(), Signature.MODE_VERIFY);
+            if(!sig.verifyPreComputedHash(buf,(short)0,lc,buf,lc,sig_size)) {
+                ISOException.throwIt(ISO7816.SW_UNKNOWN);
             }
-            ++off;
-
-            if((buf[off++] != (byte)0x02)) {
-                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return 0;
+            final short width = Common.bitsToBytes(ecParams(ec).nb_bits);
+            final short rawOff = (short)(lc + sig_size);
+            Common.requireSpace(buf,rawOff,(short)(2*width));
+            off = lc;
+            if(buf[off++] != 0x30) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            short sequenceLen = Common.readLength(buf,off,(short)(rawOff-off));
+            off = Common.skipLength(buf,off,(short)(rawOff-off));
+            if(sequenceLen != (short)(rawOff-off)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            for(byte component=0;component<2;++component) {
+                if((short)(rawOff-off)<2 || buf[off++]!=2) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                short size=(short)(buf[off++] & 0xff);
+                if(size<=0 || size>(short)(rawOff-off) || buf[off]<0) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                if(size>1 && buf[off]==0) { ++off; --size; }
+                if(size>width) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+                short dst=(short)(rawOff+component*width);
+                Util.arrayFillNonAtomic(buf,dst,width,(byte)0);
+                Util.arrayCopyNonAtomic(buf,off,buf,(short)(dst+width-size),size);
+                off+=size;
             }
-
-            if((buf[off] & (byte)0x80) != (byte)0) {
-                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return 0;
-            }
-
-            final short r_size = Util.makeShort((byte)0, buf[off++]);
-            final short r_off = off;
-
-            off += r_size;
-
-            if((buf[off++] != (byte)0x02)) {
-                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return 0;
-            }
-
-            if((buf[off] & (byte)0x80) != (byte)0) {
-                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return 0;
-            }
-
-            final short s_size = Util.makeShort((byte)0, buf[off++]);
-            final short s_off = off;
-
-            off = (short)(lc + sig_size);
-
-            if(r_size < s_size) {
-                off = Util.arrayFillNonAtomic(buf, off, (short)(s_size - r_size), (byte)0);
-            }
-
-            off = Util.arrayCopyNonAtomic(buf, r_off,
-                                          buf, off, r_size);
-
-            if(s_size < r_size) {
-                off = Util.arrayFillNonAtomic(buf, off, (short)(r_size - s_size), (byte)0);
-            }
-
-            off = Util.arrayCopyNonAtomic(buf, s_off,
-                                          buf, off, s_size);
-
-            off = Util.arrayCopyNonAtomic(buf, (short)(lc + sig_size),
-                                          buf, (short)0,
-                                          (short)(off - lc - sig_size));
-
-            Util.arrayFillNonAtomic(buf, off, (short)(lc + sig_size - off), (byte)0);
-
-            return off;
+            if(off!=rawOff) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            short result=(short)(2*width);
+            Util.arrayCopyNonAtomic(buf,rawOff,buf,(short)0,result);
+            Util.arrayFillNonAtomic(buf,result,(short)(buf.length-result),(byte)0);
+            return result;
         }
 
         ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         return 0;
+    }
+
+    /* RFC 7748 decodeUCoordinate: public input only, mask bit 255 and reduce mod p.
+       After masking, the only noncanonical values are p through p+18. */
+    private static void normalizeX25519(final byte[] buf, final short off) {
+        buf[(short)(off+31)] &= (byte)0x7f;
+        boolean high = buf[(short)(off+31)] == (byte)0x7f;
+        for(short i=1;i<31;++i) { high &= buf[(short)(off+i)] == (byte)0xff; }
+        if(high && (short)(buf[off] & 0xff) >= (short)0xed) {
+            byte low=(byte)((buf[off] & 0xff)-0xed);
+            Util.arrayFillNonAtomic(buf,off,(short)32,(byte)0);
+            buf[off]=low;
+        }
     }
 
     protected final short decipher(final Common common, final ECCurves ec,
@@ -1057,6 +1023,7 @@ public final class PGPKey {
             final Cipher cipher = common.getCipherRsaPkcs1();
             cipher.init(priv, Cipher.MODE_DECRYPT);
 
+            Common.requireSpace(buf,lc,modulus_size);
             final short len = cipher.doFinal(buf, (short)1, (short)(lc - 1),
                                              buf, lc);
 
@@ -1124,14 +1091,6 @@ public final class PGPKey {
                 return 0;
             }
 
-            /* RFC 7748 Small-Subgroup Attack Defense:
-             * Reject known non-zero order-8 roots in addition to hardware rejection of 0, 1, p-1 */
-            if((Util.arrayCompare(buf, off, LOW_ORDER_ROOT1, (short)0, (short)32) == 0) ||
-               (Util.arrayCompare(buf, off, LOW_ORDER_ROOT2, (short)0, (short)32) == 0)) {
-                ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-                return 0;
-            }
-
             if((short)(lc + 32) > (short)buf.length) {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                 return 0;
@@ -1139,14 +1098,15 @@ public final class PGPKey {
 
             /* Load remote public key into transient key object */
             final Curve25519PublicKey eph = common.getCurve25519EphPub();
-            eph.setW(buf, off, (short)32);
 
             /* Hardware X25519 key agreement */
             short secret_len = 0;
             try {
+                normalizeX25519(buf,off);
+                eph.setW(buf, off, (short)32);
                 secret_len = common.getCurve25519Ka().keyExchange(c25519_priv, eph, buf, lc);
             } catch (CryptoException e) {
-                Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
+                Util.arrayFillNonAtomic(buf, (short)0, (short)buf.length, (byte)0);
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 return 0;
             } finally {
@@ -1154,7 +1114,7 @@ public final class PGPKey {
                 eph.clearKey();
             }
 
-            /* RFC 7748 §6 & Lim-Lee Small Subgroup Attack Mitigation:
+            /* RFC 7748 搂6 & Lim-Lee Small Subgroup Attack Mitigation:
              * Validate that ECDH shared secret is not all-zero and exactly 32 bytes */
             if(secret_len != 32) {
                 Util.arrayFillNonAtomic(buf, (short)0, (short)buf.length, (byte)0);

@@ -39,8 +39,10 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     private final SecureMessaging sm;
 
     private final Transients transients;
+    private final boolean require_contactless_sm;
 
-    public SmartPGPApplet() {
+    public SmartPGPApplet(final boolean strictContactless) {
+        require_contactless_sm = strictContactless;
         common = new Common();
         ec = new ECCurves();
         data = new Persistent();
@@ -49,7 +51,18 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     }
 
     public static final void install(byte[] buf, short off, byte len) {
-        SmartPGPApplet applet = new SmartPGPApplet();
+        boolean strict = true;
+        if(buf != null && len > 0) {
+            short pos = (short)(off + 1 + (buf[off] & 0xff));
+            short end = (short)(off + (len & 0xff));
+            if(pos >= end) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            pos += (short)(1 + (buf[pos] & 0xff));
+            if(pos >= end) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            short n = (short)(buf[pos++] & 0xff);
+            if(n > 1 || (short)(pos+n) != end || (n==1 && buf[pos]!=0 && buf[pos]!=1)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            if(n==1) { strict = buf[pos]!=0; }
+        }
+        SmartPGPApplet applet = new SmartPGPApplet(strict);
         if((buf != null) && (buf[off] > 0)) {
             applet.register(buf, (short)(off + 1), buf[off]);
         } else {
@@ -85,7 +98,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         transients.setOutputLength((short)0);
 
         if(transients.chainingInput()) {
-            if((apdubuf[ISO7816.OFFSET_INS] != transients.chainingInputIns()) ||
+            if(((byte)(apdubuf[ISO7816.OFFSET_CLA] & (byte)~0x10) != transients.chainCla()) ||
+               (apdubuf[ISO7816.OFFSET_INS] != transients.chainingInputIns()) ||
                (apdubuf[ISO7816.OFFSET_P1] != transients.chainingInputP1()) ||
                (apdubuf[ISO7816.OFFSET_P2] != transients.chainingInputP2())) {
                 transients.setChainingInput(false);
@@ -104,6 +118,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             transients.setChainingInputLength((short)0);
 
             if((apdubuf[ISO7816.OFFSET_CLA] & Constants.CLA_MASK_CHAINING) == Constants.CLA_MASK_CHAINING) {
+                transients.setChainCla((byte)(apdubuf[ISO7816.OFFSET_CLA] & (byte)~0x10));
                 transients.setChainingInputIns(apdubuf[ISO7816.OFFSET_INS]);
                 transients.setChainingInputP1(apdubuf[ISO7816.OFFSET_P1]);
                 transients.setChainingInputP2(apdubuf[ISO7816.OFFSET_P2]);
@@ -122,20 +137,25 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
         short off = transients.chainingInputLength();
 
-        if((short)(off + lc) > Constants.INTERNAL_BUFFER_MAX_LENGTH) {
+        if(lc < 0 || off < 0 || lc > (short)(Constants.INTERNAL_BUFFER_MAX_LENGTH - off)) {
             transients.setChainingInput(false);
             transients.setChainingInputLength((short)0);
             ISOException.throwIt(Constants.SW_MEMORY_FAILURE);
             return;
         }
 
+        short received = 0;
         while(blen > 0) {
+            if(blen > (short)(lc-received)) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
+            received += blen;
             off = Util.arrayCopyNonAtomic(apdubuf, offcdata,
                                           transients.buffer, off,
                                           blen);
+            Util.arrayFillNonAtomic(apdubuf,offcdata,blen,(byte)0);
             blen = apdu.receiveBytes(offcdata);
         }
 
+        if(received != lc) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
         transients.setChainingInputLength(off);
     }
 
@@ -144,7 +164,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
         if(((proto & APDU.PROTOCOL_MEDIA_MASK) == APDU.PROTOCOL_MEDIA_CONTACTLESS_TYPE_A) ||
            ((proto & APDU.PROTOCOL_MEDIA_MASK) == APDU.PROTOCOL_MEDIA_CONTACTLESS_TYPE_B)) {
-            if(sm.isInitialized() && !transients.secureMessagingOk()) {
+            if((require_contactless_sm || sm.isInitialized()) && !transients.secureMessagingOk()) {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 return;
             }
@@ -693,6 +713,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
             }
+            if((short)(lc-off) < 0 || (short)(lc-off)>127) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
             minlen = (byte)(lc - off);
             if(data.keyDerivationIsActive()) {
                 if(data.keyDerivationSize() != minlen) {
@@ -729,6 +750,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
             }
+            if((short)(lc-off) < 0 || (short)(lc-off)>127) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
             minlen = (byte)(lc - off);
             if(data.keyDerivationIsActive()) {
                 if(data.keyDerivationSize() != minlen) {
@@ -788,6 +810,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                 return;
             }
+            if((short)(lc-off) < 0 || (short)(lc-off)>127) { ISOException.throwIt(ISO7816.SW_WRONG_LENGTH); }
             minlen = (byte)(lc - off);
             if(data.keyDerivationIsActive()) {
                 if(data.keyDerivationSize() != minlen) {
@@ -837,6 +860,30 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         }
     }
 
+    private static void validateKdf(final byte[] buf, final short len) {
+        if(len==3 && buf[0]==(byte)0x81 && buf[1]==1 && buf[2]==0) { return; }
+        if(len<6 || buf[0]!=(byte)0x81 || buf[1]!=1 || buf[2]!=3 ||
+           buf[3]!=(byte)0x82 || buf[4]!=1 || (buf[5]!=8 && buf[5]!=10)) {
+            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        }
+        short hashLen=buf[5]==8 ? (short)32 : (short)64;
+        short off=6;
+        byte last=(byte)0x82;
+        short seen=0;
+        while(off<len) {
+            if((short)(len-off)<2) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            byte tag=buf[off++];
+            if(tag<=last || tag<(byte)0x83 || tag>(byte)0x88) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            last=tag;
+            short size=(short)(buf[off++] & 0xff);
+            short expected=tag==(byte)0x83 ? (short)4 : ((tag<(byte)0x87) ? (short)8 : hashLen);
+            if(size!=expected || size>(short)(len-off)) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+            seen |= (short)(1 << (tag-(byte)0x83));
+            off+=size;
+        }
+        if((seen & 3)!=3) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+    }
+
     private final void processPutData(final short lc,
                                       final byte p1, final byte p2,
                                       final boolean isOdd) {
@@ -878,11 +925,6 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             switch(buf[off]) {
             case Constants.CRT_TAG_SIGNATURE_KEY:
                 k = data.pgp_keys[Persistent.PGP_KEYS_OFFSET_SIG];
-                JCSystem.beginTransaction();
-                Util.arrayFillNonAtomic(data.digital_signature_counter,
-                                        (short)0, (byte)data.digital_signature_counter.length,
-                                        (byte)0);
-                JCSystem.commitTransaction();
                 extended_expect = (byte)0x01;
                 break;
 
@@ -929,7 +971,12 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 return;
             }
 
-            k.importKey(ec, buf, off, (short)(lc - off));
+            k.importKey(common, ec, buf, off, (short)(lc - off));
+            if(k == data.pgp_keys[Persistent.PGP_KEYS_OFFSET_SIG]) {
+                JCSystem.beginTransaction();
+                Common.arrayFillAtomic(data.digital_signature_counter,(short)0,(short)3,(byte)0);
+                JCSystem.commitTransaction();
+            }
 
         } else {
             final short tag = Util.makeShort(p1, p2);
@@ -951,9 +998,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.name_length > 0) {
-                    Util.arrayFillNonAtomic(data.name, (short)0, data.name_length, (byte)0);
+                    Common.arrayFillAtomic(data.name, (short)0, data.name_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.name, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.name, (short)0, lc);
                 data.name_length = (byte)lc;
                 JCSystem.commitTransaction();
                 break;
@@ -967,9 +1014,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.login_length > 0) {
-                    Util.arrayFillNonAtomic(data.login, (short)0, data.login_length, (byte)0);
+                    Common.arrayFillAtomic(data.login, (short)0, data.login_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.login, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.login, (short)0, lc);
                 data.login_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -983,9 +1030,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.lang_length > 0) {
-                    Util.arrayFillNonAtomic(data.lang, (short)0, data.lang_length, (byte)0);
+                    Common.arrayFillAtomic(data.lang, (short)0, data.lang_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.lang, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.lang, (short)0, lc);
                 data.lang_length = (byte)lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1020,9 +1067,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.url_length > 0) {
-                    Util.arrayFillNonAtomic(data.url, (short)0, data.url_length, (byte)0);
+                    Common.arrayFillAtomic(data.url, (short)0, data.url_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.url, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.url, (short)0, lc);
                 data.url_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1036,9 +1083,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.do_0101_length > 0) {
-                    Util.arrayFillNonAtomic(data.do_0101, (short)0, data.do_0101_length, (byte)0);
+                    Common.arrayFillAtomic(data.do_0101, (short)0, data.do_0101_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.do_0101, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.do_0101, (short)0, lc);
                 data.do_0101_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1052,9 +1099,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.do_0102_length > 0) {
-                    Util.arrayFillNonAtomic(data.do_0102, (short)0, data.do_0102_length, (byte)0);
+                    Common.arrayFillAtomic(data.do_0102, (short)0, data.do_0102_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.do_0102, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.do_0102, (short)0, lc);
                 data.do_0102_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1068,9 +1115,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.do_0103_length > 0) {
-                    Util.arrayFillNonAtomic(data.do_0103, (short)0, data.do_0103_length, (byte)0);
+                    Common.arrayFillAtomic(data.do_0103, (short)0, data.do_0103_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.do_0103, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.do_0103, (short)0, lc);
                 data.do_0103_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1084,9 +1131,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.do_0104_length > 0) {
-                    Util.arrayFillNonAtomic(data.do_0104, (short)0, data.do_0104_length, (byte)0);
+                    Common.arrayFillAtomic(data.do_0104, (short)0, data.do_0104_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.do_0104, (short)0, lc);
+                Util.arrayCopy(buf, (short)0, data.do_0104, (short)0, lc);
                 data.do_0104_length = lc;
                 JCSystem.commitTransaction();
                 break;
@@ -1097,6 +1144,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                     return;
                 }
+                data.aes_key_valid = false;
                 if((data.aes_key == null) || (data.aes_key.getSize() != (short)(lc * 8))) {
                     final AESKey new_key = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES,
                                                                       (short)(lc * 8),
@@ -1112,6 +1160,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 } else {
                     data.aes_key.setKey(buf, (short)0);
                 }
+                data.aes_key_valid = true;
                 Util.arrayFillNonAtomic(buf, (short)0, lc, (byte)0);
                 break;
 
@@ -1129,7 +1178,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 assertAdmin();
                 data.pgp_keys[Persistent.PGP_KEYS_OFFSET_SIG].setAttributes(ec, buf, (short)0, lc);
                 JCSystem.beginTransaction();
-                Util.arrayFillNonAtomic(data.digital_signature_counter, (short)0,
+                Common.arrayFillAtomic(data.digital_signature_counter, (short)0,
                                         (byte)data.digital_signature_counter.length, (byte)0);
                 JCSystem.commitTransaction();
                 break;
@@ -1231,6 +1280,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             case Constants.TAG_KEY_DERIVATION_FUNCTION:
                 assertAdmin();
+                validateKdf(buf,lc);
                 if((lc < 0) ||
                    (lc > Constants.specialDoMaxLength())) {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
@@ -1238,10 +1288,10 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
                 JCSystem.beginTransaction();
                 if(data.key_derivation_function_length > 0) {
-                    Util.arrayFillNonAtomic(data.key_derivation_function, (short)0, data.key_derivation_function_length, (byte)0);
+                    Common.arrayFillAtomic(data.key_derivation_function, (short)0, data.key_derivation_function_length, (byte)0);
                 }
-                Util.arrayCopyNonAtomic(buf, (short)0, data.key_derivation_function, (short)0, lc);
-                data.key_derivation_function_length = (byte)lc;
+                Util.arrayCopy(buf, (short)0, data.key_derivation_function, (short)0, lc);
+                data.key_derivation_function_length = lc;
                 JCSystem.commitTransaction();
                 break;
 
@@ -1328,11 +1378,12 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
             assertAdmin();
 
-            pkey.generate(ec);
+            sensitiveData();
+            pkey.generate(common, ec, buf);
 
             if(do_reset) {
                 JCSystem.beginTransaction();
-                Util.arrayFillNonAtomic(data.digital_signature_counter, (short)0,
+                Common.arrayFillAtomic(data.digital_signature_counter, (short)0,
                                         (byte)data.digital_signature_counter.length, (byte)0);
                 JCSystem.commitTransaction();
             }
@@ -1369,7 +1420,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
             ++data.digital_signature_counter[(byte)(data.digital_signature_counter.length - i - 1)];
             if(i > 0) {
                 --i;
-                Util.arrayFillNonAtomic(data.digital_signature_counter,
+                Common.arrayFillAtomic(data.digital_signature_counter,
                                         (short)(data.digital_signature_counter.length - i - 1),
                                         (byte)(i + 1), (byte)0);
             }
@@ -1395,11 +1446,12 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                     return 0;
                 }
 
-                if((data.aes_key == null) || !data.aes_key.isInitialized()) {
+                if(!data.aes_key_valid || (data.aes_key == null) || !data.aes_key.isInitialized()) {
                     ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                     return 0;
                 }
 
+                Common.requireSpace(transients.buffer, lc, (short)(lc-1));
                 common.cipher_aes_cbc_nopad.init(data.aes_key, Cipher.MODE_DECRYPT);
 
                 final short res = common.cipher_aes_cbc_nopad.doFinal(transients.buffer, (short)1, (short)(lc - 1),
@@ -1426,11 +1478,12 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 return 0;
             }
 
-            if((data.aes_key == null) || !data.aes_key.isInitialized()) {
+            if(!data.aes_key_valid || (data.aes_key == null) || !data.aes_key.isInitialized()) {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 return 0;
             }
 
+            Common.requireSpace(transients.buffer, (short)(lc+1), lc);
             common.cipher_aes_cbc_nopad.init(data.aes_key, Cipher.MODE_ENCRYPT);
 
             final short res = common.cipher_aes_cbc_nopad.doFinal(transients.buffer, (short)0, lc,
@@ -1549,8 +1602,38 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
     }
 
     public final void process(final APDU apdu) {
+        try {
+            processCommand(apdu);
+        } catch(ISOException e) {
+            short sw=e.getReason();
+            if(sw!=(short)0x9000 && (short)(sw & (short)0xff00)!=(short)0x6100) {
+                if(JCSystem.getTransactionDepth()!=0) { JCSystem.abortTransaction(); }
+                clearConnection();
+            }
+            throw e;
+        } catch(RuntimeException e) {
+            if(JCSystem.getTransactionDepth()!=0) { JCSystem.abortTransaction(); }
+            clearConnection();
+            ISOException.throwIt(ISO7816.SW_UNKNOWN);
+        } finally {
+            byte[] ab=apdu.getBuffer();
+            // Some runtimes transmit the APDU buffer only after process returns.
+            // Never erase an outgoing response before the runtime has consumed it.
+            if(apdu.getCurrentState() < APDU.STATE_OUTGOING) {
+                Util.arrayFillNonAtomic(ab,(short)0,(short)ab.length,(byte)0);
+            }
+            if(!transients.chainingInput() && !transients.chainingOutput()) {
+                Util.arrayFillNonAtomic(transients.buffer,(short)0,(short)transients.buffer.length,(byte)0);
+                transients.setChainingInputLength((short)0);
+            }
+        }
+    }
+
+    private final void processCommand(final APDU apdu) {
 
         final byte[] apdubuf = apdu.getBuffer();
+        byte cla=apdubuf[ISO7816.OFFSET_CLA];
+        if(cla!=0 && cla!=0x10 && cla!=0x04 && cla!=0x14) { ISOException.throwIt(ISO7816.SW_CLA_NOT_SUPPORTED); }
 
         if(apdu.isISOInterindustryCLA() && selectingApplet()) {
 
@@ -1564,6 +1647,9 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
         }
 
         transients.setSecureMessagingOk(false);
+        if((cla & 0x04)==0 && sm.isSessionAvailable() && apdubuf[ISO7816.OFFSET_INS]!=Constants.INS_GET_RESPONSE) {
+            clearConnection();
+        }
 
         if(data.isTerminated) {
             if((apdubuf[ISO7816.OFFSET_CLA] & Constants.CLA_MASK_CHANNEL) != 0) {
@@ -1638,8 +1724,6 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
                 transients.setSecureMessagingOk(true);
 
-            } else if(sm.isSessionAvailable()) {
-                clearConnection();
             }
 
             try {
@@ -1707,6 +1791,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
 
             } catch (ISOException e) {
+                if(JCSystem.getTransactionDepth()!=0) { JCSystem.abortTransaction(); }
                 sw = e.getReason();
             }
 
@@ -1723,6 +1808,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
                 if(available_le > 0) {
                     short tmp = (short)(Constants.AES_BLOCK_SIZE - (available_le % Constants.AES_BLOCK_SIZE));
+                    Common.requireSpace(transients.buffer,available_le,(short)(tmp+Constants.AES_BLOCK_SIZE));
                     available_le = Util.arrayCopyNonAtomic(SecureMessaging.PADDING_BLOCK, (short)0,
                                                            transients.buffer, available_le,
                                                            tmp);
@@ -1730,8 +1816,8 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
 
                 if((available_le != 0) ||
                    (sw == (short)0x9000) ||
-                   ((short)(sw & (short)0x6200) == (short)0x6200) ||
-                   ((short)(sw & (short)0x6300) == (short)0x6300)) {
+                   ((short)(sw & (short)0xff00) == (short)0x6200) ||
+                   ((short)(sw & (short)0xff00) == (short)0x6300)) {
                     available_le = sm.encryptAndSign(transients, available_le, sw);
                 }
             }
@@ -1752,6 +1838,7 @@ public final class SmartPGPApplet extends Applet implements ExtendedLength {
                 }
             }
 
+            if(resp_le > (short)apdubuf.length) { resp_le=(short)apdubuf.length; }
             if(resp_le > Constants.APDU_MAX_LENGTH) {
                 resp_le = Constants.APDU_MAX_LENGTH;
             }

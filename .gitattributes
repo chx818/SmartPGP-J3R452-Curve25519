@@ -1,0 +1,13 @@
+*.java text eol=lf
+*.py text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.cap binary
+*.jar binary
+*.npz binary
+
+audit/** -text
+reports/** -text
+
+production/evidence/** -text

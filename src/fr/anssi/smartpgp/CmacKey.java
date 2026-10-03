@@ -66,20 +66,16 @@ public final class CmacKey {
         cipher.doFinal(k2, (short)0, Constants.AES_BLOCK_SIZE,
                        k1, (short)0);
 
-        final boolean mark = ((k1[0] & (byte)0x80) != (byte)0);
+        final byte reduction = (byte)(0x87 & -(short)((k1[0] >>> 7) & 1));
         Common.arrayLeftShift(k1, (short)0,
                               k1, (short)0,
                               Constants.AES_BLOCK_SIZE);
-        if(mark) {
-            k1[(short)(Constants.AES_BLOCK_SIZE - 1)] = (byte)(k1[(short)(Constants.AES_BLOCK_SIZE - 1)] ^ (byte)0x87);
-        }
+        k1[(short)(Constants.AES_BLOCK_SIZE - 1)] ^= reduction;
 
         Common.arrayLeftShift(k1, (short)0,
                               k2, (short)0,
                               Constants.AES_BLOCK_SIZE);
-        if((k1[0] & (byte)0x80) != (byte)0) {
-            k2[(short)(Constants.AES_BLOCK_SIZE - 1)] = (byte)(k2[(short)(Constants.AES_BLOCK_SIZE - 1)] ^ (byte)0x87);
-        }
+        k2[(short)(Constants.AES_BLOCK_SIZE - 1)] ^= (byte)(0x87 & -(short)((k1[0] >>> 7) & 1));
     }
 
 }
