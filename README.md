@@ -50,6 +50,14 @@ The target JCOP configuration exposes **Java Card 3.0.5** and vendor-specific 25
 
 ---
 
+### RSA private-key import (package 1.2)
+
+RSA-3072/4096 format-3 imports now stream one component at a time into a key that remains unavailable until all seven components and pairwise checks succeed. This reuses the 1280-byte work buffer and adds 16 bytes of transient parsing state; other applets do not need to be removed for this implementation.
+
+Use the existing plaintext OpenPGP PUT DATA command/chaining on a contact interface, or on NFC with compatibility profile `00`. Large imports wrapped in SCP11b are **not** supported by this streaming path; the protected-command buffer limit is unchanged. This is not an invitation to bypass the strict NFC profile. Existing Ed25519/X25519 and RSA-2048 imports keep their complete-buffer validation path.
+
+Malformed metadata is rejected before replacing the old key. Once a valid import starts writing key components, an error, interruption or reset makes the target slot unavailable; it does not restore the old private key. Re-import is the recovery path. Independent on-card tests cover import/readback/sign/decrypt/auth, malformed input, truncation, pair mismatch, reselection and reset at an APDU boundary. They do not establish arbitrary power-cut/fault-injection resistance.
+
 ### 🛡️ 3. Cryptographic Security & Hardening Highlights
 
 1. **Hardware Delegation & Java-Level Branch Reduction**:
@@ -87,6 +95,8 @@ The current tests use independent host cryptography rather than checking status 
 - `tests/security_host.py`: RFC 4493 CMAC vectors, 124 split positions, byte-wise updates, clearing, and six EC domain-parameter checks.
 - `tests/security_card.py`: Ed25519/X25519 generation and import, known answers, low-order inputs, authorization failures, six ECDSA curves, RSA-2048, AES, certificate/DO updates and SCP11b. The completed run had 86 checks, including repeated chaining checks.
 - `tests/security_extended_card.py`: P-256 ECDH, RSA-3072/4096 signatures and RSA-2048 CRT import with independent verification.
+- `tests/test_rsa_stream_parser.py`: executes the actual Java streaming parser on the host, covering fragmentation, every RSA-4096 truncation point and abort cleanup.
+- `tests/security_rsa_stream_card.py`: destructive RSA-3072/4096 external-import and recovery tests; requires an exact expected applet AID.
 
 ```cmd
 python tests/security_host.py
@@ -210,6 +220,14 @@ This project is licensed under the **GNU General Public License v2 (GPL-2.0)** -
 
 ---
 
+### RSA 私钥导入（包版本 1.2）
+
+RSA-3072/4096 的格式3导入现在逐个分量写入密钥对象，全部七个分量及成对检查成功后才允许使用。复用原1280字节工作缓冲，只增加16字节瞬态解析状态，不要求为此删除其他应用。
+
+适用于接触接口的普通 OpenPGP PUT DATA/命令链，以及兼容profile `00`下的NFC。**封装在SCP11b中的大RSA导入不走这条流式路径**，受保护命令仍有原缓冲上限；不得因此绕开严格NFC策略。Ed25519/X25519与RSA-2048仍使用完整缓冲后的原解析验证路径。
+
+错误模板在替换旧钥前拒绝；开始写入有效导入的分量之后，异常、中断或复位会令目标槽不可用，不承诺恢复旧私钥，重新导入即可恢复。独立实卡测试包含导入/公钥读回/签名/解密/认证、恶意输入、截断、公私钥不匹配、重选及APDU边界上的受控复位；不等于任意时点断电或物理故障注入评估。
+
 ### 🛡️ 3. 密码学安全与深度加固
 
 1. **硬件密码服务与 Java 层分支减少**：
@@ -244,6 +262,8 @@ This project is licensed under the **GNU General Public License v2 (GPL-2.0)** -
 - `tests/security_host.py`：RFC 4493 CMAC 向量、124 种分段、逐字节更新、清理及六条曲线的基本参数检查。
 - `tests/security_card.py`：Ed25519/X25519 生成和导入、已知答案、低阶输入、权限负测试、六条 ECDSA 曲线、RSA-2048、AES、证书／DO 更新与 SCP11b。已完成的运行包含 86 条检查，其中有重复的命令链分片检查。
 - `tests/security_extended_card.py`：P-256 ECDH、RSA-3072/4096 签名和 RSA-2048 CRT 导入，均采用独立结果校验。
+- `tests/test_rsa_stream_parser.py`：主机上执行实际Java流式解析器，覆盖分片、RSA-4096全部截断位置及异常清理。
+- `tests/security_rsa_stream_card.py`：RSA-3072/4096外部导入与恢复的破坏性实卡测试，要求明确预期实例AID。
 
 ```cmd
 python tests/security_host.py

@@ -22,13 +22,15 @@ def apdu(ins, p1, p2, data=b"", le=True):
 def exchange(conn, cmd):
     # A 6C correction is allowed ONLY for commands known not to change state.
     data,s1,s2=conn.transmit(list(cmd))
-    if s1==0x6c and cmd[1] in (0xa4,0xca,0xc0):
+    if s1==0x6c and (cmd[1] in (0xa4,0xca,0xc0) or (cmd[1]==0x47 and cmd[2]==0x81)):
         data,s1,s2=conn.transmit(list(cmd[:-1]+bytes([s2])))
     out=bytes(data)
     for _ in range(32):
         if s1!=0x61:
             return out,(s1<<8)|s2
-        data,s1,s2=conn.transmit([0,0xc0,0,0,s2])
+        # Bounded reads also work with PC/SC bridges whose native receive count
+        # is one byte (256 data bytes plus SW would overflow that API).
+        data,s1,s2=conn.transmit([0,0xc0,0,0,min(s2 or 256,128)])
         out+=bytes(data)
     raise RuntimeError("too many response segments")
 

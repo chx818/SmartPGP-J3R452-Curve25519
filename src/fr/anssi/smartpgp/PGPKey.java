@@ -677,6 +677,50 @@ public final class PGPKey {
         return true;
     }
 
+    protected final void beginStreamImport() {
+        if(!isRsa() || (rsaModulusBitSize()!=3072 && rsaModulusBitSize()!=4096)) {
+            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        }
+        resetKeys(false);
+        setKeyState(KEY_UPDATING,false);
+        keys=generateRSA();
+        if(keys==null) { ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); }
+    }
+
+    protected final void setStreamComponent(final short component, final byte[] buffer, final short length) {
+        if(key_state!=KEY_UPDATING || key_state_inverse!=(byte)~KEY_UPDATING || keys==null) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+        short width=Common.bitsToBytes(rsaModulusBitSize());
+        short expected=component==0 ? (short)3 : (component==6 ? width : (short)(width/2));
+        if(length!=expected) { ISOException.throwIt(ISO7816.SW_WRONG_DATA); }
+        RSAPrivateCrtKey priv=(RSAPrivateCrtKey)keys.getPrivate();
+        RSAPublicKey pub=(RSAPublicKey)keys.getPublic();
+        switch(component) {
+        case 0: pub.setExponent(buffer,(short)0,length); break;
+        case 1: priv.setP(buffer,(short)0,length); break;
+        case 2: priv.setQ(buffer,(short)0,length); break;
+        case 3: priv.setPQ(buffer,(short)0,length); break;
+        case 4: priv.setDP1(buffer,(short)0,length); break;
+        case 5: priv.setDQ1(buffer,(short)0,length); break;
+        case 6: pub.setModulus(buffer,(short)0,length); break;
+        default: ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        }
+    }
+
+    protected final void finishStreamImport(final Common common, final ECCurves ec, final byte[] buffer) {
+        if(key_state!=KEY_UPDATING || key_state_inverse!=(byte)~KEY_UPDATING || !keyObjectsInitialized()) {
+            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        }
+        validatePair(common,ec,buffer);
+        has_been_generated=false;
+        setKeyState(KEY_VALID,false);
+    }
+
+    protected final void abortStreamImport() {
+        resetKeys(false);
+    }
+
     protected final void importKey(final Common common, final ECCurves ec,
                                    final byte[] buf, final short boff, final short len) {
         Common.requireSpace(buf, boff, len);
