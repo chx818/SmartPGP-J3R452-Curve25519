@@ -6,3 +6,5 @@
 *.cap binary
 *.jar binary
 *.npz binary
+
+dist/SHA256SUMS text eol=lf
