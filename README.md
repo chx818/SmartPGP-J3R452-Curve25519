@@ -122,16 +122,18 @@ Run `install.bat --reader PCD` (or `./install.ps1 --reader PCD`). This installs 
 
 ### ⚙️ 6. Building from Source
 
-**Prerequisites**: JDK 11 and Python 3. Apache Ant is an optional entry point and still invokes Python.
+**Prerequisites**: The pinned JDK 11.0.32.1+1 and Python 3.10+. Apache Ant is an optional entry point and still invokes Python.
 
 ```cmd
 build.bat
 ```
 *(PowerShell users can execute `./build.ps1`)*.
 
-The build script compiles JavaCard bytecode against Oracle Java Card SDK 3.0.5/3.1.0, executes the Oracle Converter, and performs bytecode verification.
+The build script compiles committed inputs twice using the pinned JDK/SDK, normalizes only archive timestamps/metadata, and independently verifies both resulting CAP files. It publishes only when the entire files are byte-for-byte identical. See [Reproducible builds](REPRODUCIBLE-BUILD.md) for the toolchain, source-commit binding and `--check-release`.
 
-Output binary: `dist/SmartPGPApplet.cap`
+Output binary: `dist/SmartPGPApplet.cap`; identical copy: `prebuilt/SmartPGPApplet.cap`. The exact file identity is published in `dist/SHA256SUMS`.
+
+The applet source is available, but the current Curve25519 wrapper is a pinned prebuilt dependency whose full implementation source is not published upstream. This is not a claim that the whole card stack is fully open source.
 
 ---
 
@@ -280,14 +282,16 @@ install.bat --reader PCD
 
 ### ⚙️ 6. 源码构建说明
 
-**前置依赖**：JDK 11 与 Python 3。Apache Ant 是可选入口，仍会调用 Python 构建器。
+**前置依赖**：锁文件规定的 JDK 11.0.32.1+1 与 Python 3.10+。Apache Ant 是可选入口，仍会调用 Python 构建器。
 
 ```cmd
 build.bat
 ```
 *(PowerShell 用户可执行 `./build.ps1`)*。
 
-构建脚本会自动调用 Java Card SDK 3.0.5/3.1.0 进行字节码编译、Oracle Converter 转换以及离线 Verifier 完整性校验。构建产物输出于：`dist/SmartPGPApplet.cap`。
+构建器使用已提交源码和锁定工具链独立构建两次，规范化归档时间戳，并校验最终CAP；仅当整个文件字节完全一致才更新 `dist` 和 `prebuilt`。详见[可复现构建说明](REPRODUCIBLE-BUILD.md)，用户可用 `--check-release` 重新编译核对公开成品。整体文件哈希发布在 `dist/SHA256SUMS`。
+
+本仓库的SmartPGP applet源码可重建，但当前Curve25519包装库仍是固定哈希的预编译依赖，上游未公开完整实现；不能把这等同于整张卡和全部依赖100%开源。
 
 ---
 
