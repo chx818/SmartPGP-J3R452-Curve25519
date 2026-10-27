@@ -9,9 +9,9 @@
 > [!TIP]
 > **🛒 Support the Project / 购买成品卡片支持本项目**:
 >
-> **中文**：如果您来自中国或者拥有中国电商网站可用的支付方式，可以考虑直接购买我的物美价廉的全功能成品卡片来支持我，基于 J3R452 构建，售价仅需 119 元（约 18 美元），购买链接：https://item.taobao.com/item.htm?ft=t&id=1087207954892
+> **中文**：如果您来自中国或者拥有中国电商网站可用的支付方式，可以考虑直接购买我的物美价廉的全功能成品卡片来支持我，基于 J3R452 构建，集成 FIDO2+PIV+OpenPGP+OTP+Satochip+Seedkeeper，售价仅需 119 元（约 18 美元），购买链接：https://item.taobao.com/item.htm?ft=t&id=1087207954892
 >
-> **English**: If you are from China or have a payment method supported by Chinese e-commerce platforms, please consider supporting me by directly purchasing my affordable, full-featured finished card. Built on NXP J3R452, it is priced at only ¥119 (~$18 USD). Purchase link: https://item.taobao.com/item.htm?ft=t&id=1087207954892
+> **English**: If you are from China or have a payment method supported by Chinese e-commerce platforms, please consider supporting me by directly purchasing my affordable, full-featured finished card. Built on NXP J3R452, integrating FIDO2 + PIV + OpenPGP + OTP + Satochip + Seedkeeper, it is priced at only ¥119 (~$18 USD). Purchase link: https://item.taobao.com/item.htm?ft=t&id=1087207954892
 
 [English](#english) | [中文说明](#中文说明)
 
